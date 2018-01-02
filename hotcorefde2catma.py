@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Spyder Editor
+This modules converts the output of HotCorefDe 
+http://www.ims.uni-stuttgart.de/forschung/ressourcen/werkzeuge/HotCorefDe
+to a CATMA Annotation Collection in TEI XML format.
 
-This is a temporary script file.
+@author: marco.petris@web.de
 """
 import sys
 import catma
@@ -12,6 +14,14 @@ import hotcorefde
 
 def convert_hotcorefde_to_catma(
         author, conll12_filename, tei_output_filename, sourcetext_filename=None):
+    """
+    author: The author of the Annotations.
+    conll12_filename: The filename of the input file, the CoNLL-2012 anntotions.
+    tei_output_filename: The filename of the output file.
+    sourcetext_filename: 
+        The filename of the source text (optional). If absent the text gets
+        constructed from the CoNLL-2012 input file.
+    """
 
     text = None
     if sourcetext_filename is not None:

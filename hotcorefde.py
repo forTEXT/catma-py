@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sun Dec 31 13:12:33 2017
+Provides a token line handler for the conll12.LineParser to read the HotCorefDe
+output (coreference, numerus and genus) into CATMA Annotations as generated
+by http://www.ims.uni-stuttgart.de/forschung/ressourcen/werkzeuge/HotCorefDe
 
-@author: mp
+@author: marco.petris@web.de
 """
 import re
 import catma
 import conll12
 
 class Coref(object):
+    """
+    Helper class to keep track of coreferences during parsing.
+    """
     PATTERN = re.compile(r"(\()?(\d+)(\))?")
     GROUP_OPENPAR = 1
     GROUP_INDEX = 2
@@ -51,7 +56,25 @@ class Coref(object):
         return "".join(res)
 
 class HotCorefDeTokenHandler(conll12.BaseTokenHandler):
+    """
+    A token line handler for the conll12.LineParser to read the HotCorefDe
+    coreference, numerus and genus into CATMA Annotations, which can be
+    retrieved by the 'annotations' property.
+    """
     def __init__(self, tagset, author, text=None, tokensep="\t", absent_token_value="-"):
+        """
+        Constructs a HotCorefDeTokenHandler with a Tagset providing the
+        Tags 'genus', 'numerus' and 'coref_base'.
+        Details:
+            genus:
+                Column 8 in the COnLL-2012 format, custom addition by HotCorefDe
+            numerus:
+                Column 9 in the COnLL-2012 format, custom addition by HotCorefDe
+            coref_base:
+                Column 13. Each coreference gets its own Tag named Coreferenc[index]. With index
+                being an incremented number starting with 0. The coreference Tags have
+                coref_base as their parent Tag.
+        """
         super().__init__(text=text)
         self.tagset = tagset
         self.author = author
@@ -62,6 +85,11 @@ class HotCorefDeTokenHandler(conll12.BaseTokenHandler):
         self.opencorefs = dict()
 
     def token(self, token_line, sentenceno):
+        """
+        This method gets called by the LineParser which provides the current
+        token_line and the current sentenceno. It reads columns
+        8, 9 and 13 into CATMA Annotation structures (property annotations).
+        """
         entries = token_line.split(sep=self.tokensep)
         documentid = entries[0]
         partno = entries[1]

@@ -56,22 +56,30 @@ class Tag(object):
     """
     Represents a CATMA Tag, i. e. the type or code of an Annotation.
     """
-    def __init__(self, name, color=generate_random_color(), author="Unknown", parent=None):
+    def __init__(self, name, color=None, author="Unknown", parent=None):
         """
-        Constructs a Tag with a name, an optional color which defaults to a 
+        Constructs a Tag with a name, an optional color which defaults to a
         random color, an optional author which defaults to "Unknown" and an optional
         parent Tag which defaults to None for root Tags.
         """
         self.name = name
         self.uuid = uuid.uuid4()
         self.parent = parent
-        self.color = color
+
+        if color is None:
+            self.color = generate_random_color()
+        else:
+            self.color = color
 
         self.properties = {}
         self.add_or_update_property("catma_displaycolor", self.color, False)
         self.add_or_update_property("catma_markupauthor", author, False)
 
     def add_or_update_property(self, name, value, adhoc):
+        """
+        Adds a Property with the given name if not present. If the value is not
+        adhoc value it gets added to the list of possible values for the Property.
+        """
         if name not in self.properties.keys():
             values = set()
             if not adhoc:
@@ -85,39 +93,80 @@ class Tag(object):
         return self.name
 
 class Property(object):
+    """
+    Represents a CATMA Property of a Tag.
+    """
     def __init__(self, name, values):
+        """
+        Constructs a Property with the given name and a list of possible values.
+        """
         self.name = name
         self.values = values
         self.uuid = uuid.uuid4()
 
 class Tagset(object):
+    """
+    Represents a CATMA Tagset.
+    """
     def __init__(self, name, tags):
+        """
+        Constructs a Tagset with the given name and a dictionary of Tagname to
+        Tag mappings for this Tagset.
+        """
         self.name = name
         self.uuid = uuid.uuid4()
         self.tags = tags
+
     def __str__(self):
         return self.name
 
 class Annotation(object):
+    """
+    Represents a CATMA Annotation, typed by a Tag. An Annotation has a collection
+    of Ranges that reference the text segments and a dictionary of key-valueset properties.
+    """
     def __init__(self, tag):
+        """
+        Constructs an Annotation with its Tag.
+        """
         self.uuid = uuid.uuid4()
         self.tag = tag
         self.properties = {}
         self.ranges = []
+
     def __str__(self):
         return str(self.tag) + "@" + str(self.ranges) + " with " + str(self.properties)
 
     def addproperty(self, name, value, adhoc=False):
-        self.properties[name] = value
+        """
+        Adds a property value to the named property of this Annotation.
+        If the value is not an adhoc value, it gets added to the possible values
+        set of the Property definition of the Tag.
+        """
+        if name not in self.properties.keys():
+            self.properties[name] = set()
+
+        self.properties[name].add(str(value))
+
         self.tag.add_or_update_property(name, value, adhoc)
 
 
 class Range(object):
+    """
+    Represents a segment of text by its start and end character offsets.
+    """
     def __init__(self, start, end):
+        """
+        Constructs a Range with start and end character offsets.
+        """
         self.start = start
         self.end = end
 
     def get_overlapping_range(self, other):
+        """
+        Returns the overlapping Range of ths Range and the other Range if there
+        is one else None.
+        """
         if other.start == self.end or self.start == other.end:
             return None
 
@@ -135,12 +184,22 @@ class Range(object):
         return None
 
     def is_in_between(self, other):
+        """
+        Returns True if the other Range is in between this Range.
+        """
         return self.start >= other.start and self.end <= other.end
 
     def has_overlapping_range(self, other):
+        """
+        Returns True if this Range and the other Range have an overlapping Range.
+        """
         return self.get_overlapping_range(other) is not None
 
     def get_overlapping_ranges(self, ranges):
+        """
+        Returns a possibly empty list of overlapping Ranges between this Range
+        and the given Ranges.
+        """
         overlapping_ranges = list()
         for other in ranges:
             if self.has_overlapping_range(other):
@@ -148,6 +207,10 @@ class Range(object):
         return overlapping_ranges
 
     def get_disjoint_ranges(self, other):
+        """
+        Returns zero, one or two disjoint Ranges between this Range and the
+        other Range.
+        """
         result = list()
         if self.is_in_between_exclusive_edge(other.start):
             result.append(Range(self.start, other.start))
@@ -160,18 +223,32 @@ class Range(object):
         return result
 
     def is_in_between_inclusive_edge(self, point):
+        """
+        Returns True if the given point is within the bounds of this Range edges
+        included.
+        """
         return point >= self.start and point <= self.end
 
     def is_in_between_exclusive_edge(self, point):
+        """
+        Returns True if the given point is within the bounds of this Range edges
+        excluded.
+        """
         return point > self.start and point < self.end
 
     def is_after(self, point):
+        """
+        Returns True if the given point is after the end of this Range.
+        """
         return self.end < point
 
     def __hash__(self):
         return hash((self.start, self.end))
 
     def __eq__(self, other):
+        """
+        Equality by start and end offsets.
+        """
         return (self.start, self.end) == (other.start, other.end)
 
     def __ne__(self, other):
@@ -202,19 +279,31 @@ class Range(object):
             return self.end > other.end
 
         return False
+
     def __str__(self):
         return "[" + str(self.start) + "," + str(self.end) + "]"
 
     @classmethod
     def as_ranges(cls, tupel_list):
-        result = list()
-        for other in tupel_list:
-            result.append(Range(other[0], other[1]))
-        return result
+        """
+        Returns a list of Ranges out of the given list of pairs of start offset
+        and end offset.
+        """
+        return [Range(other[0], other[1]) for other in tupel_list]
 
 
 class TEIAnnotationWriter(object):
+    """
+    Writes CATMA Annotations along with their Tag information as a TEI XML formatted
+    document. The format follows the CATMA TEI Import Export format version 4
+    as described here: http://catma.de/documentation/technical-specs/tei-export-format/
+    """
     def __init__(self, text, author, title, tagsets, annotations_list):
+        """
+        Constructs a TEIAnnotationWriter with the text that has been annotated,
+        the author of the Annotations, the title of the resulting Annotation Collection,
+        a list of relevant Tagsets, and a list of annotation lists.
+        """
         self.text = text
         self.author = author
         self.title = title
@@ -222,6 +311,10 @@ class TEIAnnotationWriter(object):
         self.annotations_list = annotations_list
 
     def write_to_tei(self, filename=None, write_on_stdout=True):
+        """
+        Writes the data of this TEIAnnotationWriter to a file with the given full
+        filename. Writes also to stdout if write_on_stdout is True (default)
+        """
         documentid = uuid.uuid4()
         tei_el = XML.Element("TEI", {"xml:lang": "en", "xmlns": "http://www.tei-c.org/ns/1.0"})
         header_el = XML.SubElement(tei_el, "teiHeader")
@@ -310,6 +403,8 @@ class TEIAnnotationWriter(object):
         return ["#"+get_catma_uuid_as_str(anno) for anno in annotations]
 
     def merge_ranges(self, annotations):
+        # creates a dictionary of non overlapping ranges and their
+        # corresponding annotations.
         merged_ranges = {Range(0, len(self.text)): list()}
         counter = 0
         for anno in annotations:
@@ -369,13 +464,14 @@ class TEIAnnotationWriter(object):
             "xml:id": get_catma_uuid_as_str(anno),
             "type": get_catma_uuid_as_str(anno.tag)}
         fs_el = XML.SubElement(text_el, "fs", attributes)
-        self.write_anno_property(fs_el, "catma_markupauthor", self.author)
-        self.write_anno_property(fs_el, "catma_displaycolor", str(anno.tag.color))
+        self.write_anno_property(fs_el, "catma_markupauthor", (self.author,))
+        self.write_anno_property(fs_el, "catma_displaycolor", (str(anno.tag.color),))
 
         for prop_key in anno.properties.keys():
-            self.write_anno_property(fs_el, prop_key, str(anno.properties[prop_key]))
+            self.write_anno_property(fs_el, prop_key, anno.properties[prop_key])
 
-    def write_anno_property(self, fs_el, name, value):
+    def write_anno_property(self, fs_el, name, values):
         prop_el = XML.SubElement(fs_el, "f", {"name": name})
-        prop_str_el = XML.SubElement(prop_el, "string")
-        prop_str_el.text = value
+        for value in values:
+            prop_str_el = XML.SubElement(prop_el, "string")
+            prop_str_el.text = value
