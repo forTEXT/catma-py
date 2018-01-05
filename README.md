@@ -13,4 +13,4 @@ Classes and functions for parsing CoNLL-2012 formatted annotations into CATMA An
 Classes and functions for parsing HotCorefDe specific annotations into CATMA Annotation structures.
 
 ### hotcorefde2catma
-A script that loads a CoNLL-2012 formatted HotCorefDe-output file and converts the containing annotations to CATMA TEI-XML Annotation Collection which can be imported into CATMA.
+A script that loads a CoNLL-2012 formatted HotCorefDe-output file and converts the containing annotations to a CATMA TEI-XML Annotation Collection which can be imported into CATMA.
