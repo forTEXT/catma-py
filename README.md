@@ -1,5 +1,5 @@
 # catma-py
-a suite of classes and functions to make Python scripts interoperable with CATMA
+A suite of classes and functions to make Python scripts interoperable with CATMA.
 
 ## Modules
 
