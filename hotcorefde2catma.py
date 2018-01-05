@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-This modules converts the output of HotCorefDe 
+This modules converts the output of HotCorefDe
 http://www.ims.uni-stuttgart.de/forschung/ressourcen/werkzeuge/HotCorefDe
 to a CATMA Annotation Collection in TEI XML format.
 
@@ -18,23 +18,28 @@ def convert_hotcorefde_to_catma(
     author: The author of the Annotations.
     conll12_filename: The filename of the input file, the CoNLL-2012 anntotions.
     tei_output_filename: The filename of the output file.
-    sourcetext_filename: 
+    sourcetext_filename:
         The filename of the source text (optional). If absent the text gets
         constructed from the CoNLL-2012 input file.
     """
 
     text = None
+    # load text if available
     if sourcetext_filename is not None:
+        print("loading text...")
         txt_file = open(
             sourcetext_filename,
             mode="r",
             buffering=-1,
             encoding='utf-8',
             errors=None,
-            newline='')
+            newline='') #keep newlines as they are
         text = catma.remove_utf8bom(txt_file.read())
         txt_file.close()
-
+        print("text loaded")
+    # the default Tags for CoNLL-2012, the concrete pos Tags with 'POS' parent Tag
+    # are written into this dictionary by the token-line handler
+    # Properties are created as needed
     default_tags = {
         "pos_base": catma.Tag("POS", color=None, author=author),
         "sentence": catma.Tag("Sentence", color=None, author=author),
@@ -42,22 +47,36 @@ def convert_hotcorefde_to_catma(
         "lemma": catma.Tag("Lemma", color=None, author=author)
         }
 
+    # a token-line handler for the default Tags
     default_tokenhandler = conll12.DefaultTokenHandler(
         tagset=default_tags, author=author, text=text)
 
+    # HotCorefDe specific Tags, the concrete coreference Tags with 'coreference'
+    # parent Tag will be written into this dictionary by the token-line handler
+    # Properties are created as needed
     hotcoref_tags = {
         "coref_base": catma.Tag("Coreference", color=None, author=author),
         "genus": catma.Tag("Genus", color=None, author=author),
         "numerus": catma.Tag("Numerus", color=None, author=author)
         }
 
+    # a token-line handler for HotCorefDe specific Tags
     hotcoref_tokenhandler = hotcorefde.HotCorefDeTokenHandler(
         tagset=hotcoref_tags, author=author, text=text)
 
+    # parse the given CoNLL-2012 file
+    # the given token handlers will contain the Tags and Annotations extracted
+    # from the CoNLL-2012 input file
+    print("parsing file for Tags and Annotations...")
     conll12.LineParser().parse_file(
         filename=conll12_filename,
         linehandlers=(default_tokenhandler, hotcoref_tokenhandler))
+    print("parsing finished")
 
+    # writing Tags and Annotation to a CATMA Annotation Collection in TEI-XML
+    # format, the result will contain a 'CoNLL12 NLP' Tagset and a 'HotCorefDe'
+    # Tagset and all the corresponding Annotations
+    print("writing Tags and Annotations to TEI-XML...")
     writer = catma.TEIAnnotationWriter(
         text,
         author,
