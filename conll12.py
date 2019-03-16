@@ -231,39 +231,39 @@ class DefaultTokenHandler(BaseTokenHandler):
             self.close_sentence_anno()
             self.current_sentence_no = sentenceno
             self.current_sentence_anno = catma.Annotation(self.tagset.get("sentence"))
-            self.current_sentence_anno.addproperty("partno", partno)
-            self.current_sentence_anno.addproperty("documentid", documentid)
-            self.current_sentence_anno.addproperty("sentenceno", self.current_sentence_no)
+            self.current_sentence_anno.add_property("partno", partno)
+            self.current_sentence_anno.add_property("documentid", documentid)
+            self.current_sentence_anno.add_property("sentenceno", self.current_sentence_no)
             self.annotations.append(self.current_sentence_anno)
             self.current_sentence_startidx = tokenrange.start
 
         # token annotation
         token_anno = catma.Annotation(self.tagset.get("token"))
         token_anno.ranges.append(tokenrange)
-        token_anno.addproperty("partno", partno)
-        token_anno.addproperty("documentid", documentid)
-        token_anno.addproperty("wordno", wordno)
-        token_anno.addproperty("pos", pos)
-        token_anno.addproperty("parsebit", parsebit)
+        token_anno.add_property("partno", partno)
+        token_anno.add_property("documentid", documentid)
+        token_anno.add_property("wordno", wordno)
+        token_anno.add_property("pos", pos)
+        token_anno.add_property("parsebit", parsebit)
         self.annotations.append(token_anno)
 
         # POS annotation
         pos_tag = self.get_pos_tag(pos)
         pos_anno = catma.Annotation(pos_tag)
         pos_anno.ranges.append(tokenrange)
-        pos_anno.addproperty("partno", partno)
-        pos_anno.addproperty("documentid", documentid)
-        pos_anno.addproperty("wordno", wordno)
+        pos_anno.add_property("partno", partno)
+        pos_anno.add_property("documentid", documentid)
+        pos_anno.add_property("wordno", wordno)
         self.annotations.append(pos_anno)
 
         if lemma.strip() != self.absent_token_value:
             # Lemma annotation
             lemma_anno = catma.Annotation(self.tagset.get("lemma"))
             lemma_anno.ranges.append(tokenrange)
-            lemma_anno.addproperty("partno", partno)
-            lemma_anno.addproperty("documentid", documentid)
-            lemma_anno.addproperty("wordno", wordno)
-            lemma_anno.addproperty("lemma", lemma, adhoc=True)
+            lemma_anno.add_property("partno", partno)
+            lemma_anno.add_property("documentid", documentid)
+            lemma_anno.add_property("wordno", wordno)
+            lemma_anno.add_property("lemma", lemma, adhoc=True)
             self.annotations.append(lemma_anno)
 
         self.current_text_pos = tokenrange.end

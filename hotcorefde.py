@@ -105,23 +105,23 @@ class HotCorefDeTokenHandler(conll12.BaseTokenHandler):
         # genus annotation
         genus_anno = catma.Annotation(self.tagset.get("genus"))
         genus_anno.ranges.append(tokenrange)
-        genus_anno.addproperty("partno", partno)
-        genus_anno.addproperty("documentid", documentid)
-        genus_anno.addproperty("wordno", wordno)
-        genus_anno.addproperty("pos", pos)
-        genus_anno.addproperty("parsebit", parsebit)
-        genus_anno.addproperty("genus", genus)
+        genus_anno.add_property("partno", partno)
+        genus_anno.add_property("documentid", documentid)
+        genus_anno.add_property("wordno", wordno)
+        genus_anno.add_property("pos", pos)
+        genus_anno.add_property("parsebit", parsebit)
+        genus_anno.add_property("genus", genus)
         self.annotations.append(genus_anno)
 
         # numerus annotation
         numerus_anno = catma.Annotation(self.tagset.get("numerus"))
         numerus_anno.ranges.append(tokenrange)
-        numerus_anno.addproperty("partno", partno)
-        numerus_anno.addproperty("documentid", documentid)
-        numerus_anno.addproperty("wordno", wordno)
-        numerus_anno.addproperty("pos", pos)
-        numerus_anno.addproperty("parsebit", parsebit)
-        numerus_anno.addproperty("numerus", numerus)
+        numerus_anno.add_property("partno", partno)
+        numerus_anno.add_property("documentid", documentid)
+        numerus_anno.add_property("wordno", wordno)
+        numerus_anno.add_property("pos", pos)
+        numerus_anno.add_property("parsebit", parsebit)
+        numerus_anno.add_property("numerus", numerus)
         self.annotations.append(numerus_anno)
 
         # coreference annotations
@@ -157,11 +157,10 @@ class HotCorefDeTokenHandler(conll12.BaseTokenHandler):
             self.tagset[key] = \
                 catma.Tag(
                     "Coref" + str(coref.index),
-                    color=None,
                     author=self.author,
                     parent=self.tagset["coref_base"])
         coref_anno = catma.Annotation(self.tagset.get(key))
         coref_anno.ranges.append(coref.get_range())
-        coref_anno.addproperty("index", coref.index)
+        coref_anno.add_property("index", coref.index)
         # coref_anno.addproperty("text", self.get_text()[coref.startidx:coref.endidx], adhoc=True)
         self.annotations.append(coref_anno)

@@ -41,10 +41,10 @@ def convert_hotcorefde_to_catma(
     # are written into this dictionary by the token-line handler
     # Properties are created as needed
     default_tags = {
-        "pos_base": catma.Tag("POS", color=None, author=author),
-        "sentence": catma.Tag("Sentence", color=None, author=author),
-        "token": catma.Tag("Token", color=None, author=author),
-        "lemma": catma.Tag("Lemma", color=None, author=author)
+        "pos_base": catma.Tag("POS", author=author),
+        "sentence": catma.Tag("Sentence", author=author),
+        "token": catma.Tag("Token", author=author),
+        "lemma": catma.Tag("Lemma", author=author)
         }
 
     # a token-line handler for the default Tags
@@ -55,9 +55,9 @@ def convert_hotcorefde_to_catma(
     # parent Tag will be written into this dictionary by the token-line handler
     # Properties are created as needed
     hotcoref_tags = {
-        "coref_base": catma.Tag("Coreference", color=None, author=author),
-        "genus": catma.Tag("Genus", color=None, author=author),
-        "numerus": catma.Tag("Numerus", color=None, author=author)
+        "coref_base": catma.Tag("Coreference", author=author),
+        "genus": catma.Tag("Genus", author=author),
+        "numerus": catma.Tag("Numerus", author=author)
         }
 
     # a token-line handler for HotCorefDe specific Tags
@@ -78,11 +78,12 @@ def convert_hotcorefde_to_catma(
     # Tagset and all the corresponding Annotations
     print("writing Tags and Annotations to TEI-XML...")
     writer = catma.TEIAnnotationWriter(
-        text,
-        author,
-        "HotCorefDe Annotations",
-        (catma.Tagset("CoNLL12 NLP", default_tags), catma.Tagset("HotCorefDe", hotcoref_tags)),
-        (default_tokenhandler.annotations, hotcoref_tokenhandler.annotations))
+        len(text),
+        "HotCorefDe Annotations", [
+            catma.Tagset("CoNLL12 NLP", default_tags.values()),
+            catma.Tagset("HotCorefDe", hotcoref_tags.values())],
+        [default_tokenhandler.annotations, hotcoref_tokenhandler.annotations],
+        author=author)
     writer.write_to_tei(tei_output_filename, write_on_stdout=False)
 
     print("conversion finished")
