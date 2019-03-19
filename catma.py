@@ -82,7 +82,6 @@ def get_uuid_from_catma_uuid_str(catma_uuid: str) -> uuid.UUID:
     """
     return uuid.UUID(catma_uuid[6:])
 
-
 class Property(object):
     """
     Represents a CATMA Property of a Tag.
@@ -427,6 +426,18 @@ class Range(object):
         return [Range(other[0], other[1]) for other in tupel_list]
 
 
+def extract_range(target: str) -> Range:
+    """
+    Extracts a Range from a <ptr> target attribute.
+
+    :param target: a <ptr> target like catma://CATMA_0854DF2F-9527-428E-B753-84C0710AFDA5#char=42,48
+    :return: a Range with the target offsets
+    """
+    range_str = target[target.rfind("=") + 1:]
+    range_offsets = range_str.split(",")
+    return Range(int(range_offsets[0]), int(range_offsets[1]))
+
+
 class TEIAnnotationWriter(object):
     """
     Writes CATMA Annotations along with their Tag information as a TEI XML formatted
@@ -468,7 +479,7 @@ class TEIAnnotationWriter(object):
         :param filename: then full path of the output file
         :param write_on_stdout: if True the result is also printed to stdout
         """
-        tei_el = XML.Element("TEI", {"xml:lang": "en", "xmlns": "http://www.tei-c.org/ns/1.0"})
+        tei_el = XML.Element("TEI", {"xml:lang": "en", "xmlns": TEI_NAMESPACE_MAPPING["tei"]})
         header_el = XML.SubElement(tei_el, "teiHeader")
         text_el = XML.SubElement(tei_el, "text")
         body_el = XML.SubElement(text_el, "body")
@@ -482,7 +493,7 @@ class TEIAnnotationWriter(object):
             XML.dump(tei_el)
         if filename is not None:
             # print(XML.tostring(tei_el, pretty_print=True))
-            XML.ElementTree(tei_el).write(file_or_filename=filename, encoding="utf-8")
+            XML.ElementTree(tei_el).write(file_or_filename=filename, xml_declaration=True, encoding="utf-8", method="xml")
 
     def write_tagsets(self, tei_el: XML):
         encodingdesc_el = XML.SubElement(tei_el, "encodingDesc")
@@ -648,6 +659,7 @@ class TEIAnnotationReader(object):
         self.tagsets = []
         self.annotations = []
 
+        XML.register_namespace("", TEI_NAMESPACE_MAPPING["tei"])
         doc = XML.parse(filename)
         self.read_metadata(doc)
         has_ptr_refs = doc.find("./tei:text/tei:body/tei:ab//tei:ptr", TEI_NAMESPACE_MAPPING) is not None
@@ -700,7 +712,7 @@ class TEIAnnotationReader(object):
         ptr_elements = doc.findall("./tei:text/tei:body/tei:ab//tei:ptr", TEI_NAMESPACE_MAPPING)
         last_ptr_element = ptr_elements[len(ptr_elements) - 1]
         target = last_ptr_element.get("target")
-        last_range = self.extract_range(target)
+        last_range = extract_range(target)
         return last_range.end, self.extract_documentid(target)
 
     def get_tag(self, uuid: uuid.UUID) -> Tag:
@@ -749,15 +761,10 @@ class TEIAnnotationReader(object):
     def extract_pointer_range(self, segment_node: XML) -> Range:
         ptr_element = segment_node.find("./tei:ptr", TEI_NAMESPACE_MAPPING)
         target = ptr_element.get("target")
-        return self.extract_range(target)
+        return extract_range(target)
 
     def extract_documentid(selfs, target: str) -> str:
         return target[target.find("CATMA_") + 6:target.find("#")]
-
-    def extract_range(self, target: str) -> Range:
-        range_str = target[target.rfind("=") + 1:]
-        range_offsets = range_str.split(",")
-        return Range(int(range_offsets[0]), int(range_offsets[1]))
 
     def read_tagsets(self, doc: XML):
         tagset_nodes = doc.findall(".//tei:encodingDesc/tei:fsdDecl", TEI_NAMESPACE_MAPPING)
@@ -858,3 +865,37 @@ def merge_collections(collection_filename1, collection_filename2, oubput_filenam
         documentid=reader1.documentid)
 
     writer.write_to_tei(oubput_filename)
+
+def convert_ptr_refs_to_text(collection_filename: str, text_filename: str, output_filename: str):
+    txt_file = open(text_filename, encoding="utf-8", newline="")
+    text = txt_file.read()
+    txt_file.close()
+
+    XML.register_namespace("", TEI_NAMESPACE_MAPPING["tei"])
+
+    collection_doc = XML.parse(collection_filename)
+
+    ab_el = collection_doc.find(".//tei:text/tei:body/tei:ab", TEI_NAMESPACE_MAPPING)
+    parent_map = {c: p for p in collection_doc.getroot().iter() for c in p}
+
+    predecessor = None
+    for child_el in ab_el:
+        if child_el.tag == "{"+TEI_NAMESPACE_MAPPING["tei"]+"}ptr":
+            anno_range = extract_range(child_el.get("target"))
+            if predecessor is None:
+                ab_el.text = text[anno_range.start:anno_range.end]
+            else:
+                predecessor.tail = text[anno_range.start:anno_range.end]
+        elif child_el.tag == "{"+TEI_NAMESPACE_MAPPING["tei"]+"}seg":
+            ptr_el = child_el[0]
+            anno_range = extract_range(ptr_el.get("target"))
+            child_el.text = text[anno_range.start:anno_range.end]
+            predecessor = child_el
+
+    for ptr_el in ab_el.findall(".//tei:ptr", TEI_NAMESPACE_MAPPING):
+        parent = parent_map[ptr_el]
+        parent.remove(ptr_el)
+
+
+    XML.ElementTree(collection_doc.getroot()).write(
+        file_or_filename=output_filename, xml_declaration=True, encoding="utf-8", method="xml")
