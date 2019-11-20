@@ -425,6 +425,32 @@ class Range(object):
         """
         return [Range(other[0], other[1]) for other in tupel_list]
 
+    @staticmethod
+    def merge_ranges(sorted_ranges: list) -> list:
+        """
+        :param sorted_ranges: a list of Ranges sorted by start/end
+        :return: a list of merged ranges, i. e. all contiguous ranges are combined into one
+        """
+        result = list()
+        if len(sorted_ranges) == 0:
+            return []
+
+        cur_range = None
+
+        for range in sorted_ranges:
+            if cur_range is None:
+                cur_range = range
+            else:
+                if cur_range.end == range.start:
+                    cur_range = Range(cur_range.start, range.end)
+                else:
+                    result.append(cur_range)
+                    cur_range = range
+
+        result.append(cur_range)
+
+        return result
+
 
 def extract_range(target: str) -> Range:
     """
@@ -831,6 +857,7 @@ class TEIAnnotationReader(object):
                     property_def.values.append(value_node.text)
                 tag.add_property(property_def)
 
+
 def merge_collections(collection_filename1, collection_filename2, oubput_filename, title=None, author=None):
     """
     Merges two Annotations Collections into one.
@@ -866,7 +893,17 @@ def merge_collections(collection_filename1, collection_filename2, oubput_filenam
 
     writer.write_to_tei(oubput_filename)
 
+
 def convert_ptr_refs_to_text(collection_filename: str, text_filename: str, output_filename: str):
+    """
+    Loads an Annotation Collection and a Source Document and replaces all pointer (<ptr>) occurrences in the Collection
+    that point to the Source Document with their corresponding segment of text. The result is written to a file with the
+    given output_filename. The Annotation Collection must belong the Source Document!
+
+    :param collection_filename: Name of the Annotation Collection
+    :param text_filename:  Name of the Source Document
+    :param output_filename: The name of the output file.
+    """
     txt_file = open(text_filename, encoding="utf-8", newline="")
     text = txt_file.read()
     txt_file.close()
@@ -896,6 +933,426 @@ def convert_ptr_refs_to_text(collection_filename: str, text_filename: str, outpu
         parent = parent_map[ptr_el]
         parent.remove(ptr_el)
 
-
     XML.ElementTree(collection_doc.getroot()).write(
         file_or_filename=output_filename, xml_declaration=True, encoding="utf-8", method="xml")
+
+
+class XMLSourceDocumentChunk(object):
+
+    def __init__(self, start_pos: int, end_pos: int, node: XML=None, is_tail=False, is_newline = False):
+        self.range = Range(start_pos, end_pos)
+        self.node = node
+        self.is_tail = is_tail
+        self.is_newline = is_newline
+
+    def get_range(self) -> int:
+        return self.range
+
+    def get_text(self, text_range: Range=None) -> str:
+        if self.is_newline:
+            return '\n'
+
+        if self.is_tail:
+            if text_range is None:
+                return self.node.tail
+            return self.node.tail[text_range.start-self.range.start:text_range.end-self.range.start]
+        else:
+            if text_range is None:
+                return self.node.text
+            return self.node.text[text_range.start-self.range.start:text_range.end-self.range.start]
+
+    def get_text_from(self, pos: int) -> str:
+        if self.is_newline and pos-self.range.start > 0:
+            return '\n'
+        elif self.is_newline:
+            return ''
+
+        if self.is_tail:
+            return self.node.tail[pos-self.range.start:]
+        else:
+            return self.node.text[pos-self.range.start:]
+
+    def get_text_up_to(self, pos: int) -> str:
+        if self.is_newline and pos-self.range.start > 0:
+            return '\n'
+        elif self.is_newline:
+            return ''
+
+        if self.is_tail:
+            return self.node.tail[:pos-self.range.start]
+        else:
+            return self.node.text[:pos-self.range.start]
+
+    def __repr__(self):
+        return str(self.range) + ' ' + str(self.is_tail) + ' ' + str(self.is_newline) \
+               + ('' if self.is_newline else ' ' + (self.node.tail if self.is_tail else self.node.text))
+
+    def __hash__(self):
+        return hash((self.range, self.is_tail, self.is_newline))
+
+    def __eq__(self, other):
+        """
+        Equality by start and end offsets, tail flag and newline flag.
+        """
+        return (self.range, self.is_tail, self.is_newline) == (other.range, other.is_tail, other.is_newline)
+
+    def __ne__(self, other):
+        return not self == other
+
+    def apply(self, annotation: Annotation, merged_range: Range, parent_map: map, recalculate_positions):
+        anno_text = self.get_text(merged_range)
+        new_text_or_tail = self.get_text_up_to(merged_range.start)
+        anno_tail = self.get_text_from(merged_range.end)
+
+        anno_el = XML.Element(
+            "anno",
+            {"annotationId": get_catma_uuid_as_str(annotation),
+             "tagId": get_catma_uuid_as_str(annotation.tag),
+             "tagPath": annotation.tag.get_path()})
+        # TODO: element name, properties
+
+        if self.is_tail:
+            parent = parent_map[self.node]
+            parent.insert(list(parent).index(self.node)+1, anno_el)
+
+            parent_map[anno_el] = parent
+
+            self.node.tail = new_text_or_tail
+        else:
+            self.node.insert(0, anno_el)
+
+            parent_map[anno_el] = self.node
+
+            self.node.text = new_text_or_tail
+
+        anno_el.text = anno_text
+
+        anno_text_chunk = XMLSourceDocumentChunk(merged_range.start, merged_range.end, anno_el, False)
+        anno_tail_chunk = None
+
+        if len(anno_tail) > 0:
+            anno_el.tail = anno_tail
+            anno_tail_chunk = XMLSourceDocumentChunk(merged_range.end, self.range.end, anno_el, True)
+        old_range = self.range
+        self.range = Range(self.range.start, merged_range.start)
+        recalculate_positions(self, old_range, anno_text_chunk, anno_tail_chunk)
+
+    def get_layer(self, parent_map: map):
+        if self.is_tail:
+            return parent_map[self.node]
+        else:
+            return self.node
+
+
+class XMLSourceDocumentPosition(object):
+
+    def __init__(self, search_pos: int):
+        self.search_pos = search_pos
+        self.pos = 0
+        self.chunks = list()
+        self.locked = False
+
+    def increment(self, node: XML, is_tail: bool) -> XMLSourceDocumentChunk:
+        if not self.locked:
+            start_pos = self.pos
+            if is_tail:
+                self.pos += len(node.tail)
+            else:
+                self.pos += len(node.text)
+
+            self.chunks.append(XMLSourceDocumentChunk(start_pos, self.pos, node, is_tail=is_tail))
+
+            if self.is_greater(self.search_pos):
+                self.lock()
+
+    def increment_by_newline(self):
+        if not self.locked:
+            start_pos = self.pos
+            self.pos += 1
+            self.chunks.append(XMLSourceDocumentChunk(start_pos, self.pos, is_newline=True))
+
+            if self.is_greater(self.search_pos):
+                self.lock()
+
+    def is_greater(self, pos: int) -> bool:
+        return self.pos > pos
+
+    def lock(self):
+        self.locked = True
+
+    def is_locked(self) -> bool:
+        return self.locked
+
+    def get_max_matching_chunk(self):
+        reversed_chunks =  list(self.chunks)
+        reversed_chunks.reverse()
+        for chunk in reversed_chunks:
+            if chunk.get_range().is_in_between_inclusive_edge(self.search_pos):
+                return chunk
+
+    def get_min_matching_chunk(self):
+        last_chunk = None
+        reversed_chunks =  list(self.chunks)
+        reversed_chunks.reverse()
+        for chunk in reversed_chunks:
+            if not chunk.get_range().is_in_between_inclusive_edge(self.search_pos) and last_chunk is not None:
+                return last_chunk
+            last_chunk = chunk
+
+    def recalculate_positions(self, chunk: XMLSourceDocumentChunk, old_range: Range, anno_text_chunk: XMLSourceDocumentChunk, anno_tail_chunk: XMLSourceDocumentChunk):
+        # TODO: cleanup
+        old_chunk = None
+        for c in self.chunks:
+            if c.range == old_range:
+                old_chunk = c
+                break
+
+        if old_chunk is not None:
+            idx = self.chunks.index(old_chunk)
+
+            old_chunk.range = chunk.range
+
+            if anno_text_chunk.range.start <= self.search_pos:
+                self.chunks.insert(idx+1, XMLSourceDocumentChunk(anno_text_chunk.range.start, anno_text_chunk.range.end, anno_text_chunk.node, anno_text_chunk.is_tail))
+                idx += 1
+
+            if anno_tail_chunk is not None and anno_tail_chunk.range.start <= self.search_pos:
+                self.chunks.insert(idx+1, XMLSourceDocumentChunk(anno_tail_chunk.range.start, anno_tail_chunk.range.end, anno_tail_chunk.node, anno_tail_chunk.is_tail))
+
+
+def has_text_content(node: XML) -> bool:
+    return node.text is not None and len(node.text.strip()) > 0
+
+
+def has_tail_content(node: XML) -> bool:
+    return node.tail is not None and len(node.tail.strip()) > 0
+
+
+class XMLSourceDocumentAnnotation(object):
+
+    def __init__(self, annotation: Annotation, range: Range, start_pos: XMLSourceDocumentPosition, end_pos: XMLSourceDocumentPosition):
+        self.annotation = annotation
+        self.range = range
+        self.start_pos = start_pos
+        self.end_pos = end_pos
+
+    def __repr__(self):
+        start_chunk = self.start_pos.get_max_matching_chunk()
+        end_chunk = self.end_pos.get_min_matching_chunk()
+
+        result = str(self.range) + 'annotationId ' + get_catma_uuid_as_str(self.annotation) + ' *'
+
+        if start_chunk == end_chunk:
+            result += start_chunk.get_text(self.range)
+        else:
+            result += start_chunk.get_text_from(self.range.start)
+            include = False
+            for chunk in self.end_pos.chunks:
+                if chunk == start_chunk:
+                    include = True
+                elif chunk == end_chunk:
+                    include = False
+                elif include:
+                    result += chunk.get_text()
+
+            result += end_chunk.get_text_up_to(self.range.end)
+
+        return result + '*'
+
+    def apply(self, parent_map: map, recalculate_positions):
+        start_chunk = self.start_pos.get_max_matching_chunk()
+        end_chunk = self.end_pos.get_min_matching_chunk()
+
+        if start_chunk == end_chunk:
+            start_chunk.apply(self.annotation, self.range, parent_map, recalculate_positions)
+        else:
+            start_layer = start_chunk.get_layer(parent_map)
+            end_layer = end_chunk.get_layer(parent_map)
+
+            chunks_by_layer = {start_layer : [start_chunk]}
+            include = False
+            for chunk in self.end_pos.chunks:
+                if chunk == start_chunk:
+                    include = True
+                elif chunk == end_chunk:
+                    include = False
+                elif include:
+                    if not chunk.is_newline:
+                        layer = chunk.get_layer(parent_map)
+                        parent_layer = layer
+                        while parent_layer in parent_map:
+                            if parent_layer in chunks_by_layer:
+                                layer = parent_layer
+                            if layer == end_layer:
+                                break
+                            parent_layer = parent_map[parent_layer]
+
+                        if layer in chunks_by_layer:
+                            chunks_by_layer[layer].append(chunk)
+                        else:
+                            chunks_by_layer[layer] = [chunk]
+
+            if end_layer in chunks_by_layer:
+                chunks_by_layer[end_layer].append(end_chunk)
+            else:
+                chunks_by_layer[end_layer] = [end_chunk]
+
+            for layer, chunks in chunks_by_layer.items():
+                layer_start_chunk = chunks[0]
+                layer_end_chunk = chunks[len(chunks)-1]
+
+                if layer_start_chunk == layer_end_chunk:
+                    if layer_start_chunk == start_chunk:
+                        start_chunk.apply(self.annotation, Range(self.range.start, start_chunk.range.end), parent_map, recalculate_positions)
+                    elif layer_start_chunk == end_chunk:
+                        start_chunk.apply(self.annotation, Range(start_chunk.range.start, self.range.end), parent_map, recalculate_positions)
+                    else:
+                        start_chunk.apply(self.annotation, Range(start_chunk.range.start, start_chunk.range.end), parent_map, recalculate_positions)
+                else:
+
+                    layer_start_range = layer_start_chunk.range
+                    if layer_start_chunk == start_chunk:
+                        layer_start_range = Range(self.range.start, start_chunk.range.end)
+
+                    layer_end_range = layer_end_chunk.range
+                    if layer_end_chunk == end_chunk:
+                        layer_end_range = Range(layer_end_chunk.range.start, self.range.end)
+
+                    anno_text = layer_start_chunk.get_text(layer_start_range)
+                    new_layer_start_chunk_text_or_tail = layer_start_chunk.get_text_up_to(layer_start_range.start)
+                    new_layer_end_chunk_tail = layer_end_chunk.get_text_up_to(self.range.end)
+
+                    anno_tail = layer_end_chunk.get_text_from(self.range.end)
+
+                    anno_el = XML.Element(
+                        "anno",
+                        {"annotationId": get_catma_uuid_as_str(self.annotation),
+                         "tagId": get_catma_uuid_as_str(self.annotation.tag),
+                         "tagPath": self.annotation.tag.get_path()})
+                    # TODO: element name, properties
+
+                    anno_el.text = anno_text
+                    anno_el.tail = anno_tail
+
+                    if layer_start_chunk.is_tail:
+                       layer.tail = new_layer_start_chunk_text_or_tail
+                    else:
+                       layer.text = new_layer_start_chunk_text_or_tail
+
+                    layer_end_chunk.node.tail = new_layer_end_chunk_tail
+
+                    if layer_start_chunk.node == layer:
+                        layer.insert(0, anno_el)
+                    else:
+                        layer.insert(layer.index(layer_start_chunk.node), anno_el)
+
+                    for chunk in chunks:
+                        parent = parent_map[chunk.node]
+                        if parent == layer:
+                            if chunk.node in parent:
+                                parent.remove(chunk.node)
+                                anno_el.append(chunk.node)
+
+                    anno_text_chunk = XMLSourceDocumentChunk(layer_start_range.start, layer_start_range.end, anno_el, False)
+                    anno_tail_chunk = None
+
+                    if len(anno_tail) > 0:
+                        anno_el.tail = anno_tail
+                        anno_tail_chunk = XMLSourceDocumentChunk(self.range.end, layer_end_chunk.range.end, anno_el, True)
+
+                    old_layer_start_chunk_range = layer_start_chunk.range
+                    layer_start_chunk.range = Range(layer_start_chunk.range.start, layer_start_range.start)
+                    old_layer_end_chunk_range = layer_end_chunk.range
+                    layer_end_chunk.range = Range(layer_end_chunk.range.start, self.range.end)
+
+
+
+                    #todo: handle new chunks, layer_start_chunk, layer_end_chunk
+
+
+
+    def recalculate_positions(self, chunk: XMLSourceDocumentChunk, old_range: Range, anno_text_chunk: XMLSourceDocumentChunk, anno_tail_chunk: XMLSourceDocumentChunk):
+        self.start_pos.recalculate_positions(chunk, old_range, anno_text_chunk, anno_tail_chunk)
+        self.end_pos.recalculate_positions(chunk, old_range, anno_text_chunk, anno_tail_chunk)
+
+
+class XMLSourceDocument(object):
+
+    def __init__(self, filename: str):
+        self.doc = XML.parse(filename)
+        self.parent_map = {el: parent for parent in self.doc.getroot().iter() for el in parent}
+        self.document_annotations = list()
+
+    def apply(self, annotations: list):
+
+        for annotation in annotations:
+            ranges = Range.merge_ranges(sorted(annotation.ranges))
+            for range in ranges:
+                start_pos = XMLSourceDocumentPosition(range.start)
+                self.seek_position(self.doc.getroot(), start_pos);
+
+                end_pos = XMLSourceDocumentPosition(range.end)
+                self.seek_position(self.doc.getroot(), end_pos)
+
+                self.document_annotations.append(XMLSourceDocumentAnnotation(annotation, range, start_pos, end_pos))
+
+        for document_annotation in self.document_annotations:
+            #todo: cleanup
+            start_chunk = document_annotation.start_pos.get_max_matching_chunk()
+            end_chunk = document_annotation.end_pos.get_min_matching_chunk()
+            range = document_annotation.range
+            print(document_annotation)
+            if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_A000B42F-B89C-48E5-8124-991DE00CD896':
+                print('test')
+                break
+            document_annotation.apply(self.parent_map, self.recalculate_positions)
+
+    def recalculate_positions(self, chunk: XMLSourceDocumentChunk, old_range: Range, anno_text_chunk: XMLSourceDocumentChunk, anno_tail_chunk: XMLSourceDocumentChunk):
+        for document_annotation in self.document_annotations:
+            document_annotation.recalculate_positions(chunk, old_range, anno_text_chunk, anno_tail_chunk)
+
+    def seek_position(self, parent_node: XML, current_pos: XMLSourceDocumentPosition):
+
+        if has_text_content(parent_node):
+            current_pos.increment(parent_node, False)
+
+        if current_pos.is_locked():
+            return
+        else:
+            for child_node in parent_node:
+                self.seek_position(child_node, current_pos)
+                if current_pos.is_locked():
+                    return
+
+            if has_text_content(parent_node) or len(list(parent_node)) > 0:
+                current_pos.increment_by_newline()
+
+            if has_tail_content(parent_node):
+                current_pos.increment(parent_node, True)
+
+
+def apply_collection_to_xml_document(collection_filename: str, document_filename: str, output_filename: str):
+
+    collection_reader = TEIAnnotationReader(collection_filename)
+    tagsets = collection_reader.tagsets
+    annotations = collection_reader.annotations
+
+    source_doc = XMLSourceDocument(document_filename)
+    source_doc.apply(annotations)
+
+    print(XML.tostring(source_doc.doc.getroot(),))
+    source_doc.doc.write(file_or_filename=output_filename, xml_declaration=True, encoding="utf-8", method="xml")
+
+        #print(anno.ranges)
+        #print(anno.tag)
+
+    #doc.apply(136, 608)
+    #doc.apply(325, 608)
+    #doc.apply(840, 608)
+
+#    doc.apply(10791, 608)
+#    doc.apply(16283, 608)
+#    doc.apply(51780, 0)
+#    doc.apply(52829, 608)
+
+
