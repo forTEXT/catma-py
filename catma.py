@@ -938,6 +938,9 @@ def convert_ptr_refs_to_text(collection_filename: str, text_filename: str, outpu
 
 
 class XMLSourceDocumentChunk(object):
+    """
+    Represents a chunk of text within the XML document, this can be either a node's text content or its tail content.
+    """
 
     def __init__(self, start_pos: int, end_pos: int, node: XML=None, is_tail=False, is_newline = False):
         self.range = Range(start_pos, end_pos)
@@ -949,6 +952,11 @@ class XMLSourceDocumentChunk(object):
         return self.range
 
     def get_text(self, text_range: Range=None) -> str:
+        """
+        :param text_range: an optional range, if not given all text is returned
+        :return: the text of this chunk, either all or within the given range
+        """
+
         if self.is_newline:
             return '\n'
 
@@ -962,6 +970,11 @@ class XMLSourceDocumentChunk(object):
             return self.node.text[text_range.start-self.range.start:text_range.end-self.range.start]
 
     def get_text_from(self, pos: int) -> str:
+        """
+        :param pos: a start position
+        :return: the text from the given position to the end of the chunk
+        """
+
         if self.is_newline and pos-self.range.start > 0:
             return '\n'
         elif self.is_newline:
@@ -973,6 +986,11 @@ class XMLSourceDocumentChunk(object):
             return self.node.text[pos-self.range.start:]
 
     def get_text_up_to(self, pos: int) -> str:
+        """
+        :param pos: the end position
+        :return: the text of this chunk up to the given position
+        """
+
         if self.is_newline and pos-self.range.start > 0:
             return '\n'
         elif self.is_newline:
@@ -1000,8 +1018,18 @@ class XMLSourceDocumentChunk(object):
         return not self == other
 
     def apply(self, annotation: Annotation, merged_range: Range, parent_map: map, recalculate_positions):
+        """
+        Applies the given annotation to this chunk.
+        :param annotation: the annotation to apply
+        :param merged_range: the range of the annotated text
+        :param parent_map: a mapping of child nodes to their parent
+        :param recalculate_positions: a function that recalculates all positions of all chunks of all annotations after the application of the given annotation
+        """
+        # annotated text
         anno_text = self.get_text(merged_range)
+        # non annotated text
         new_text_or_tail = self.get_text_up_to(merged_range.start)
+        # non annotated tail
         anno_tail = self.get_text_from(merged_range.end)
 
         anno_el = XML.Element(
@@ -1040,7 +1068,7 @@ class XMLSourceDocumentChunk(object):
     def get_layer(self, parent_map: map):
         """
         :param parent_map: a mapping from node->parent node
-        :return: the layer of this chunk, that is the chunks node or its parent in case of a tail
+        :return: the layer of this chunk, that is the chunk's node or its parent in case of a tail
         """
         if self.is_tail:
             return parent_map[self.node]
@@ -1048,15 +1076,26 @@ class XMLSourceDocumentChunk(object):
             return self.node
 
 
-class XMLSourceDocumentPosition(object):
-
+class XMLSourceDocumentPositionPointer(object):
+    """
+    A position pointer that gets forwarded when incremented by text/tail chunks or artificial newlines
+    """
     def __init__(self, search_pos: int):
+        """
+        :param search_pos: the designated position of this pointer
+        """
         self.search_pos = search_pos
         self.pos = 0
         self.chunks = list()
         self.locked = False
 
     def increment(self, node: XML, is_tail: bool) -> XMLSourceDocumentChunk:
+        """
+        Moves this pointer forward by the text amount of the given node text or tail.
+        :param node: the node with text/tail content
+        :param is_tail: true if content is in tail, false if content is in text
+        :return: a chunk for the given node part
+        """
         if not self.locked:
             start_pos = self.pos
             if is_tail:
@@ -1070,6 +1109,10 @@ class XMLSourceDocumentPosition(object):
                 self.lock()
 
     def increment_by_newline(self):
+        """
+        Increments this pointer by an artificial newline
+        :return: a chunk representing the atrificial newline
+        """
         if not self.locked:
             start_pos = self.pos
             self.pos += 1
@@ -1079,15 +1122,28 @@ class XMLSourceDocumentPosition(object):
                 self.lock()
 
     def is_greater(self, pos: int) -> bool:
+        """
+        :param pos: the position to test
+        :return: true if the position this pointer points to is greater than the given position
+        """
         return self.pos > pos
 
     def lock(self):
+        """
+        Locks this pointer to its current position. Further calls to increment won't have any effect anymore.
+        """
         self.locked = True
 
     def is_locked(self) -> bool:
+        """
+        :return: true if this pointer is locked to its current position and cannot be moved forward anymore
+        """
         return self.locked
 
     def get_max_matching_chunk(self):
+        """
+        :return: the chunk that is as close to the search position of this pointer as possible coming from the left side
+        """
         reversed_chunks =  list(self.chunks)
         reversed_chunks.reverse()
         for chunk in reversed_chunks:
@@ -1095,6 +1151,9 @@ class XMLSourceDocumentPosition(object):
                 return chunk
 
     def get_min_matching_chunk(self):
+        """
+        :return: the chunk that is as close to the search position of this pointer as possible coming from the right side
+        """
         last_chunk = None
         reversed_chunks =  list(self.chunks)
         reversed_chunks.reverse()
@@ -1103,40 +1162,48 @@ class XMLSourceDocumentPosition(object):
                 return last_chunk
             last_chunk = chunk
 
-    def recalculate_positions(self, \
+    def recalculate(self, \
                               start_chunk: XMLSourceDocumentChunk, old_start_chunk_range: Range, \
                               end_chunk: XMLSourceDocumentChunk, old_end_chunk_range, \
                               anno_text_chunk: XMLSourceDocumentChunk, anno_tail_chunk: XMLSourceDocumentChunk):
-        # TODO: cleanup, end_chunk
-        # old_chunk = None
-        # for c in self.chunks:
-        #     if c.range == old_start_chunk_range:
-        #         old_chunk = c
-        #         break
+        """
+        Recalculates the chunks of this pointer according to the given information.
+        :param start_chunk: the new start chunk to replace the old start chunk at old_start_chunk_range
+        :param old_start_chunk_range: the start chunk's old range
+        :param end_chunk: the new end chunk to replace the old end chunk at old_end_chunk_range
+        :param old_end_chunk_range: the end chunk's old range
+        :param anno_text_chunk: the new annotation's text chunk
+        :param anno_tail_chunk:  the new annotation's end chunk
+        """
 
-        # find the old start chunk
+        # find the old start chunk by the given old start chunk's range
         old_start_chunk = next((c for c in self.chunks if c.range == old_start_chunk_range), None)
 
+        # find the old end chunk by the given old end chunk's range (if given at all)
         old_end_chunk = None
         if old_end_chunk_range is not None:
             old_end_chunk = next((c for c in self.chunks if c.range == old_end_chunk_range), None)
 
+        # is the given start chunk represented in this pointer's chunk list?
         if old_start_chunk is not None:
             idx = self.chunks.index(old_start_chunk)
-
+            # set the new range of the start chunk
             old_start_chunk.range = start_chunk.range
-
+            # if the search position of this pointer includes the annotated text chunk
             if anno_text_chunk.range.start <= self.search_pos:
                 self.chunks.insert(idx+1,
                                    XMLSourceDocumentChunk(anno_text_chunk.range.start, anno_text_chunk.range.end,
                                                           anno_text_chunk.node, anno_text_chunk.is_tail))
                 idx += 1
 
+            # if there is no end chunk and the annotated tail chunk exists and is within the search position of this pointer
+            # then include the annotated tail chunk
             if old_end_chunk_range is None and anno_tail_chunk is not None and anno_tail_chunk.range.start <= self.search_pos:
                 self.chunks.insert(idx+1,
                                    XMLSourceDocumentChunk(anno_tail_chunk.range.start, anno_tail_chunk.range.end,
                                                           anno_tail_chunk.node, anno_tail_chunk.is_tail))
 
+        # adjust the range of the old end chunk if there is any
         if old_end_chunk is not None:
             idx = self.chunks.index(old_end_chunk)
 
@@ -1149,16 +1216,27 @@ class XMLSourceDocumentPosition(object):
 
 
 def has_text_content(node: XML) -> bool:
+    """
+    :param node: the node to test
+    :return: true if the given node has non empty text content, else false
+    """
     return node.text is not None and len(node.text.strip()) > 0
 
 
 def has_tail_content(node: XML) -> bool:
+    """
+    :param node: the node to test
+    :return: true if the given node has non empty tail content
+    """
     return node.tail is not None and len(node.tail.strip()) > 0
 
 
 class XMLSourceDocumentAnnotation(object):
+    """
+    A representation of a CATMA Annotation on top of a XML based Sourdce Document.
+    """
 
-    def __init__(self, annotation: Annotation, range: Range, start_pos: XMLSourceDocumentPosition, end_pos: XMLSourceDocumentPosition):
+    def __init__(self, annotation: Annotation, range: Range, start_pos: XMLSourceDocumentPositionPointer, end_pos: XMLSourceDocumentPositionPointer):
         self.annotation = annotation
         self.range = range
         self.start_pos = start_pos
@@ -1188,11 +1266,24 @@ class XMLSourceDocumentAnnotation(object):
         return result + '*'
 
     def get_chunks_for_layer(self, start_chunk: XMLSourceDocumentChunk, end_chunk: XMLSourceDocumentChunk, layer: XML, parent_map):
-        chunks = []
+        """
+        Collects and returns the chunks for the given layer.
+        :param start_chunk: the start chunk, where this Annotation starts
+        :param end_chunk:  the end chunk, where this Annotation ends
+        :param layer: the layer we want chunks for
+        :param parent_map: a mapping of child nodes to parent nodes
+        :return: the chunks for the given layer
+        """
+
         start_layer = start_chunk.get_layer(parent_map)
         end_layer = end_chunk.get_layer(parent_map)
-        if start_layer == layer:
-            chunks.append(start_chunk)
+
+        # the search for the correct parent layer
+        # depends on when a layer appears first in the grouping
+        # that's why we need to group all chunks by their layer
+        # and not just the ones from the given layer
+
+        chunks_by_layer = {start_layer: [start_chunk]}
 
         include = False
         for chunk in self.end_pos.chunks:
@@ -1208,22 +1299,35 @@ class XMLSourceDocumentAnnotation(object):
                     # layers that are further down the tree get wrapped automatically then
                     parent_layer = current_layer
                     while parent_layer in parent_map:
-                        if parent_layer == layer:
+                        if parent_layer in chunks_by_layer:
                             current_layer = parent_layer
                         if current_layer == end_layer:
                             break
                         parent_layer = parent_map[parent_layer]
 
-                    if current_layer == layer:
-                        chunks.append(chunk)
+                    if current_layer in chunks_by_layer:
+                        chunks_by_layer[current_layer].append(chunk)
+                    else:
+                        chunks_by_layer[current_layer] = [chunk]
 
-        if end_layer == layer:
-            chunks.append(end_chunk)
+        if end_layer in chunks_by_layer:
+            chunks_by_layer[end_layer].append(end_chunk)
+        else:
+            chunks_by_layer[end_layer] = [end_chunk]
 
-        return chunks
+        # return only the chunks from the given layer
+        return chunks_by_layer[layer]
 
     def apply(self, parent_map: map, recalculate_positions):
+        """
+        Applies this annotation to the document which is represented by the chunks of its positions
+        :param parent_map: a mapping of child nodes to their parents
+        :param recalculate_positions: a function that recalculates the positions in all other annotations after this annotation has been applied
+        """
+
+        # get the chunk where the annotation currently starts
         start_chunk = self.start_pos.get_max_matching_chunk()
+        # get the chunk where the annotation currently ends
         end_chunk = self.end_pos.get_min_matching_chunk()
 
         if start_chunk == end_chunk:
@@ -1232,18 +1336,21 @@ class XMLSourceDocumentAnnotation(object):
         else:
             # hard, start_chunk and end_chunk are different
 
-            # get the layers of the chunks, either there nodes or the corresponding parent nodes in case of tails
+            # get the layers of the chunks, either their nodes or the corresponding parent nodes in case of tail chunks
             start_layer = start_chunk.get_layer(parent_map)
             end_layer = end_chunk.get_layer(parent_map)
 
-            # we group all chunks between start chunk and end chunk by their layers
+            # get all layers involved
+            # the search for the correct parent layer
+            # depends on when a layer appears first in the list!!!
+
             layers = [start_layer]
             include = False
             for chunk in self.end_pos.chunks:
                 if chunk == start_chunk:
-                    include = True # start including the chunks into the map
+                    include = True # start including the layers
                 elif chunk == end_chunk:
-                    include = False # stop including the chunks into the map
+                    include = False # stop including the layers
                 elif include:
                     if not chunk.is_newline: # skip newline chunks
                         layer = chunk.get_layer(parent_map)
@@ -1264,21 +1371,23 @@ class XMLSourceDocumentAnnotation(object):
             if end_layer not in layers:
                 layers.append(end_layer)
 
-            # for each layer and its chunks we compute the annotated chunks and recalculate the positions
+            # for each layer we compute the annotated chunks and recalculate the positions
             for layer in layers:
+                # get fresh start and end chunks because they might have changed during recalculation
                 start_chunk = self.start_pos.get_max_matching_chunk()
                 end_chunk = self.end_pos.get_min_matching_chunk()
+
                 chunks = self.get_chunks_for_layer(start_chunk, end_chunk, layer, parent_map)
 
                 layer_start_chunk = chunks[0]
                 layer_end_chunk = chunks[len(chunks)-1]
 
                 if layer_start_chunk == layer_end_chunk: # easy: start chunk and end chunk of the layer are the same
-                    if layer_start_chunk == start_chunk:
+                    if layer_start_chunk == start_chunk: # start of the annotation, may be a partial chunk
                         start_chunk.apply(self.annotation, Range(self.range.start, start_chunk.range.end), parent_map, recalculate_positions)
-                    elif layer_start_chunk == end_chunk:
+                    elif layer_start_chunk == end_chunk: # end of the annotation, may be a partial chunk
                         end_chunk.apply(self.annotation, Range(end_chunk.range.start, self.range.end), parent_map, recalculate_positions)
-                    else:
+                    else: # somewhere in between, annotate full chunk
                         start_chunk.apply(self.annotation, Range(start_chunk.range.start, start_chunk.range.end), parent_map, recalculate_positions)
                 else:
                     # hard: calculate a modfied start chunk with the start of the annotation
@@ -1291,11 +1400,15 @@ class XMLSourceDocumentAnnotation(object):
                     if layer_end_chunk == end_chunk:
                         layer_end_range = Range(layer_end_chunk.range.start, self.range.end)
 
-                    # annotation start
+                    # annotated text of the start chunk
                     anno_text = layer_start_chunk.get_text(layer_start_range)
+                    # non annotated text of the start chunk
                     new_layer_start_chunk_text_or_tail = layer_start_chunk.get_text_up_to(layer_start_range.start)
+
+                    # annotated text of the end chunk
                     new_layer_end_chunk_tail = layer_end_chunk.get_text_up_to(self.range.end)
 
+                    # non annotated text trailing the new annotation
                     anno_tail = layer_end_chunk.get_text_from(self.range.end)
 
                     anno_el = XML.Element(
@@ -1308,21 +1421,24 @@ class XMLSourceDocumentAnnotation(object):
                     anno_el.text = anno_text
                     anno_el.tail = anno_tail
 
+                    # set non annotated text of the start chunk
                     if layer_start_chunk.is_tail:
                         layer_start_chunk.node.tail = new_layer_start_chunk_text_or_tail
                     else:
                         layer_start_chunk.node.text = new_layer_start_chunk_text_or_tail
 
+                    # set annotated text of the end chunk
                     layer_end_chunk.node.tail = new_layer_end_chunk_tail
 
-                    if layer_start_chunk.node == layer:
+                    # insert the new annotation element
+                    if layer_start_chunk.node == layer: # the annotation start in the text of the layer node
                         layer.insert(0, anno_el)
-                    else:
+                    else: # the annotation start in the tail of a child node of the layer node
                         layer.insert(list(layer).index(layer_start_chunk.node)+1, anno_el)
 
                     parent_map[anno_el] = layer
 
-                    # reassign all inner chunk to the annotation node
+                    # reassign all inner chunk nodes to the annotation node
                     for chunk in chunks:
                         if not chunk == layer_start_chunk and not chunk == layer_end_chunk:
                             parent = parent_map[chunk.node]
@@ -1332,6 +1448,7 @@ class XMLSourceDocumentAnnotation(object):
                                     anno_el.append(chunk.node)
                                     parent_map[chunk.node] = anno_el
 
+                    # create new chunks for text and tail of the new annotation node
                     anno_text_chunk = XMLSourceDocumentChunk(layer_start_range.start, layer_start_range.end, anno_el, False)
                     anno_tail_chunk = None
 
@@ -1339,6 +1456,8 @@ class XMLSourceDocumentAnnotation(object):
                         anno_el.tail = anno_tail
                         anno_tail_chunk = XMLSourceDocumentChunk(self.range.end, layer_end_chunk.range.end, anno_el, True)
 
+                    # adjust the ranges of start and end chunks of the current layers
+                    # keep the old ranges to recalculate the positions in all other annotations
                     old_layer_start_chunk_range = layer_start_chunk.range
                     layer_start_chunk.range = Range(layer_start_chunk.range.start, layer_start_range.start)
                     old_layer_end_chunk_range = layer_end_chunk.range
@@ -1350,26 +1469,44 @@ class XMLSourceDocumentAnnotation(object):
                               start_chunk: XMLSourceDocumentChunk, old_start_chunk_range: Range, \
                               end_chunk: XMLSourceDocumentChunk, old_end_chunk_range, \
                               anno_text_chunk: XMLSourceDocumentChunk, anno_tail_chunk: XMLSourceDocumentChunk):
-        self.start_pos.recalculate_positions(start_chunk, old_start_chunk_range, end_chunk, old_end_chunk_range, anno_text_chunk, anno_tail_chunk)
-        self.end_pos.recalculate_positions(start_chunk, old_start_chunk_range, end_chunk, old_end_chunk_range, anno_text_chunk, anno_tail_chunk)
+        """
+        Recalculates the positions of this annotation
+        :param start_chunk: the new start chunk to replace the old start chunk at old_start_chunk_range
+        :param old_start_chunk_range: the start chunk's old range
+        :param end_chunk: the new end chunk to replace the old end chunk at old_end_chunk_range
+        :param old_end_chunk_range: the end chunk's old range
+        :param anno_text_chunk: the new annotation's text chunk
+        :param anno_tail_chunk:  the new annotation's end chunk
+        """
+        self.start_pos.recalculate(start_chunk, old_start_chunk_range, end_chunk, old_end_chunk_range, anno_text_chunk, anno_tail_chunk)
+        self.end_pos.recalculate(start_chunk, old_start_chunk_range, end_chunk, old_end_chunk_range, anno_text_chunk, anno_tail_chunk)
 
 
 class XMLSourceDocument(object):
-
+    """
+    A XML based Source Document
+    """
     def __init__(self, filename: str):
         self.doc = XML.parse(filename)
         self.parent_map = {el: parent for parent in self.doc.getroot().iter() for el in parent}
         self.document_annotations = list()
 
     def apply(self, annotations: list):
+        """
+        Applies the given list of CATMA annotations to this document
+        :param annotations: the annotations to apply
+        """
 
+        # for each annotation we create a XMLSourceDocumentAnnotation which points to the start and end chunks of the documnent
         for annotation in annotations:
             ranges = Range.merge_ranges(sorted(annotation.ranges))
             for range in ranges:
-                start_pos = XMLSourceDocumentPosition(range.start)
+                # compute the start position of the annotation
+                start_pos = XMLSourceDocumentPositionPointer(range.start)
                 self.seek_position(self.doc.getroot(), start_pos);
 
-                end_pos = XMLSourceDocumentPosition(range.end)
+                # compute the end position of the annotation
+                end_pos = XMLSourceDocumentPositionPointer(range.end)
                 self.seek_position(self.doc.getroot(), end_pos)
 
                 self.document_annotations.append(XMLSourceDocumentAnnotation(annotation, range, start_pos, end_pos))
@@ -1380,10 +1517,10 @@ class XMLSourceDocument(object):
             end_chunk = document_annotation.end_pos.get_min_matching_chunk()
             range = document_annotation.range
             print(document_annotation)
-            if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_BD3C0286-ABBB-4482-B5D2-A266C2F7315A':
+            #if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_BD3C0286-ABBB-4482-B5D2-A266C2F7315A':
             #if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_16F890DB-C8FB-47EB-B389-CC9ED7ED1836':
 
-            #if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_A4526FCA-59D7-4E11-9F75-C161186092F7':
+            if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_02CBC881-D646-431C-859F-603778801237':
                 print('test')
                 #break
 
@@ -1396,7 +1533,7 @@ class XMLSourceDocument(object):
         for document_annotation in self.document_annotations:
             document_annotation.recalculate_positions(start_chunk, old_start_chunk_range, end_chunk, old_end_chunk_range, anno_text_chunk, anno_tail_chunk)
 
-    def seek_position(self, parent_node: XML, current_pos: XMLSourceDocumentPosition):
+    def seek_position(self, parent_node: XML, current_pos: XMLSourceDocumentPositionPointer):
 
         if has_text_content(parent_node):
             current_pos.increment(parent_node, False)
@@ -1415,6 +1552,9 @@ class XMLSourceDocument(object):
             if has_tail_content(parent_node):
                 current_pos.increment(parent_node, True)
 
+
+def get_element_name_from_tag(tag: Tag) -> str:
+    tag.name.replace()
 
 def apply_collection_to_xml_document(collection_filename: str, document_filename: str, output_filename: str):
 
