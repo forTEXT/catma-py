@@ -11,6 +11,7 @@ import uuid
 import xml.etree.ElementTree as XML
 import random
 import datetime
+import string
 
 # The version of the generated CATMA import/export file format
 CATMA_TEI_VERSION = 5
@@ -1017,7 +1018,8 @@ class XMLSourceDocumentChunk(object):
     def __ne__(self, other):
         return not self == other
 
-    def apply(self, annotation: Annotation, merged_range: Range, parent_map: map, recalculate_positions):
+    def apply(self, annotation: Annotation, merged_range: Range, parent_map: map, recalculate_positions,
+              element_name_from_tag_creator, attribute_name_from_property_creator):
         """
         Applies the given annotation to this chunk.
         :param annotation: the annotation to apply
@@ -1032,12 +1034,16 @@ class XMLSourceDocumentChunk(object):
         # non annotated tail
         anno_tail = self.get_text_from(merged_range.end)
 
+        properties = {attribute_name_from_property_creator("annotationId"): get_catma_uuid_as_str(annotation),
+             attribute_name_from_property_creator("tagId"): get_catma_uuid_as_str(annotation.tag),
+             attribute_name_from_property_creator("tagPath"): annotation.tag.get_path()};
+
+        for property_name in annotation.properties:
+            properties[attribute_name_from_property_creator(property_name)] = ",".join(annotation.properties[property_name])
+
         anno_el = XML.Element(
-            "anno",
-            {"annotationId": get_catma_uuid_as_str(annotation),
-             "tagId": get_catma_uuid_as_str(annotation.tag),
-             "tagPath": annotation.tag.get_path()})
-        # TODO: element name, properties
+            element_name_from_tag_creator(annotation.tag),
+            properties)
 
         if self.is_tail:
             parent = parent_map[self.node]
@@ -1236,17 +1242,21 @@ class XMLSourceDocumentAnnotation(object):
     A representation of a CATMA Annotation on top of a XML based Sourdce Document.
     """
 
-    def __init__(self, annotation: Annotation, range: Range, start_pos: XMLSourceDocumentPositionPointer, end_pos: XMLSourceDocumentPositionPointer):
+    def __init__(self, annotation: Annotation, range: Range,
+                 start_pos: XMLSourceDocumentPositionPointer, end_pos: XMLSourceDocumentPositionPointer,
+                 element_name_from_tag_creator, attribute_name_from_property_creator):
         self.annotation = annotation
         self.range = range
         self.start_pos = start_pos
         self.end_pos = end_pos
+        self.element_name_from_tag_creator = element_name_from_tag_creator
+        self.attribute_name_from_property_creator = attribute_name_from_property_creator
 
     def __repr__(self):
         start_chunk = self.start_pos.get_max_matching_chunk()
         end_chunk = self.end_pos.get_min_matching_chunk()
 
-        result = str(self.range) + 'annotationId ' + get_catma_uuid_as_str(self.annotation) + ' *'
+        result = str(self.range) + ' annotationId ' + get_catma_uuid_as_str(self.annotation) + ' *'
 
         if start_chunk == end_chunk:
             result += start_chunk.get_text(self.range)
@@ -1332,7 +1342,8 @@ class XMLSourceDocumentAnnotation(object):
 
         if start_chunk == end_chunk:
             # easy, all within one chunk, so we delegate to that chunk
-            start_chunk.apply(self.annotation, self.range, parent_map, recalculate_positions)
+            start_chunk.apply(self.annotation, self.range, parent_map, recalculate_positions,
+                              self.element_name_from_tag_creator, self.attribute_name_from_property_creator)
         else:
             # hard, start_chunk and end_chunk are different
 
@@ -1340,7 +1351,7 @@ class XMLSourceDocumentAnnotation(object):
             start_layer = start_chunk.get_layer(parent_map)
             end_layer = end_chunk.get_layer(parent_map)
 
-            # get all layers involved
+            # get all layers involved,
             # the search for the correct parent layer
             # depends on when a layer appears first in the list!!!
 
@@ -1384,11 +1395,14 @@ class XMLSourceDocumentAnnotation(object):
 
                 if layer_start_chunk == layer_end_chunk: # easy: start chunk and end chunk of the layer are the same
                     if layer_start_chunk == start_chunk: # start of the annotation, may be a partial chunk
-                        start_chunk.apply(self.annotation, Range(self.range.start, start_chunk.range.end), parent_map, recalculate_positions)
+                        start_chunk.apply(self.annotation, Range(self.range.start, start_chunk.range.end), parent_map,
+                                          recalculate_positions, self.element_name_from_tag_creator, self.attribute_name_from_property_creator)
                     elif layer_start_chunk == end_chunk: # end of the annotation, may be a partial chunk
-                        end_chunk.apply(self.annotation, Range(end_chunk.range.start, self.range.end), parent_map, recalculate_positions)
+                        end_chunk.apply(self.annotation, Range(end_chunk.range.start, self.range.end), parent_map,
+                                        recalculate_positions, self.element_name_from_tag_creator, self.attribute_name_from_property_creator)
                     else: # somewhere in between, annotate full chunk
-                        start_chunk.apply(self.annotation, Range(start_chunk.range.start, start_chunk.range.end), parent_map, recalculate_positions)
+                        start_chunk.apply(self.annotation, Range(start_chunk.range.start, start_chunk.range.end), parent_map,
+                                          recalculate_positions, self.element_name_from_tag_creator, self.attribute_name_from_property_creator)
                 else:
                     # hard: calculate a modfied start chunk with the start of the annotation
                     # and a modified end chunk with the end of the annotation
@@ -1411,12 +1425,16 @@ class XMLSourceDocumentAnnotation(object):
                     # non annotated text trailing the new annotation
                     anno_tail = layer_end_chunk.get_text_from(self.range.end)
 
+                    properties = {self.attribute_name_from_property_creator("annotationId"): get_catma_uuid_as_str(self.annotation),
+                         self.attribute_name_from_property_creator("tagId"): get_catma_uuid_as_str(self.annotation.tag),
+                         self.attribute_name_from_property_creator("tagPath"): self.annotation.tag.get_path()}
+
+                    for property_name in self.annotation.properties:
+                        properties[self.attribute_name_from_property_creator(property_name)] = ",".join(self.annotation.properties[property_name])
+
                     anno_el = XML.Element(
-                        "anno",
-                        {"annotationId": get_catma_uuid_as_str(self.annotation),
-                         "tagId": get_catma_uuid_as_str(self.annotation.tag),
-                         "tagPath": self.annotation.tag.get_path()})
-                    # TODO: element name, properties
+                        self.element_name_from_tag_creator(self.annotation.tag),
+                        properties)
 
                     anno_el.text = anno_text
                     anno_el.tail = anno_tail
@@ -1491,7 +1509,7 @@ class XMLSourceDocument(object):
         self.parent_map = {el: parent for parent in self.doc.getroot().iter() for el in parent}
         self.document_annotations = list()
 
-    def apply(self, annotations: list):
+    def apply(self, annotations: list, element_name_from_tag_creator, attribute_name_from_property_creator):
         """
         Applies the given list of CATMA annotations to this document
         :param annotations: the annotations to apply
@@ -1509,21 +1527,11 @@ class XMLSourceDocument(object):
                 end_pos = XMLSourceDocumentPositionPointer(range.end)
                 self.seek_position(self.doc.getroot(), end_pos)
 
-                self.document_annotations.append(XMLSourceDocumentAnnotation(annotation, range, start_pos, end_pos))
+                self.document_annotations.append(XMLSourceDocumentAnnotation(
+                    annotation, range, start_pos, end_pos, element_name_from_tag_creator, attribute_name_from_property_creator))
 
         for document_annotation in self.document_annotations:
-            #todo: cleanup
-            start_chunk = document_annotation.start_pos.get_max_matching_chunk()
-            end_chunk = document_annotation.end_pos.get_min_matching_chunk()
-            range = document_annotation.range
-            print(document_annotation)
-            #if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_BD3C0286-ABBB-4482-B5D2-A266C2F7315A':
-            #if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_16F890DB-C8FB-47EB-B389-CC9ED7ED1836':
-
-            if get_catma_uuid_as_str(document_annotation.annotation) == 'CATMA_02CBC881-D646-431C-859F-603778801237':
-                print('test')
-                #break
-
+            print("applying annotation: " + str(document_annotation))
             document_annotation.apply(self.parent_map, self.recalculate_positions)
 
     def recalculate_positions(self, \
@@ -1553,32 +1561,62 @@ class XMLSourceDocument(object):
                 current_pos.increment(parent_node, True)
 
 
-def get_element_name_from_tag(tag: Tag) -> str:
-    tag.name.replace()
+def create_default_element_name_from_tag(tag: Tag, non_ascii_character_mapper = lambda c : "_") -> str:
+    result = []
+    name = tag.name
 
-def apply_collection_to_xml_document(collection_filename: str, document_filename: str, output_filename: str):
+    if name[0] in string.digits:
+        result.append("T")
+    for c in name:
+        if c in string.ascii_letters + string.digits:
+            result.append(c)
+        else:
+            result.append(non_ascii_character_mapper(c))
+    return "".join(result)
 
+
+def create_default_attribute_name_from_property(name: str, non_ascii_character_mapper = lambda c : "_") -> str:
+    result = []
+
+    if name[0] in string.digits:
+        result.append("P")
+    for c in name:
+        if c in string.ascii_letters + string.digits:
+            result.append(c)
+        else:
+            result.append(non_ascii_character_mapper(c))
+    return "".join(result)
+
+
+def apply_collection_to_xml_document(collection_filename: str, document_filename: str, output_filename: str,
+                                     element_name_from_tag_creator=create_default_element_name_from_tag,
+                                     attribute_name_from_property_creator=create_default_attribute_name_from_property,
+                                     custom_namespace = None):
+    """
+    Applies all Annotations of the given Collection to the given XML based Source Document and writes the result to
+    the output file.
+    :param collection_filename: full path to the Collection file
+    :param document_filename: full path to the XML based Source Document file
+    :param output_filename: full path to the output file
+    :param element_name_from_tag_creator: a function that takes a Tag and converts its name to a valid XML element name
+    :param attribute_name_from_property_creator:  a function that takes a Property name and converts it to a valid XML attribute name
+    :param custom_namespace: a tuple with a prefix and a URL like ("mn", "http://mynamespace.com/ns")
+    :return:
+    """
     collection_reader = TEIAnnotationReader(collection_filename)
-    tagsets = collection_reader.tagsets
     annotations = collection_reader.annotations
 
+    element_name_from_tag_creator_with_ns = \
+        element_name_from_tag_creator if custom_namespace is None else lambda tag : custom_namespace[0] + ":" + element_name_from_tag_creator(tag)
+
+    attribute_name_from_property_creator_with_ns = \
+        attribute_name_from_property_creator if custom_namespace is None else lambda prop_name : custom_namespace[0] + ":" + attribute_name_from_property_creator(prop_name)
+
     source_doc = XMLSourceDocument(document_filename)
-    source_doc.apply(annotations)
+    source_doc.apply(annotations, element_name_from_tag_creator_with_ns, attribute_name_from_property_creator_with_ns)
 
-    print(XML.tostring(source_doc.doc.getroot(),))
+    if custom_namespace is not None:
+        source_doc.doc.getroot().set("xmlns:"+custom_namespace[0], custom_namespace[1])
+
+    # print(XML.tostring(source_doc.doc.getroot(),))
     source_doc.doc.write(file_or_filename=output_filename, xml_declaration=True, encoding="utf-8", method="xml")
-
-        #print(anno.ranges)
-        #print(anno.tag)
-
-    #doc.apply(136, 608)
-    #doc.apply(325, 608)
-    #doc.apply(840, 608)
-
-#    doc.apply(10791, 608)
-#    doc.apply(16283, 608)
-#    doc.apply(51780, 0)
-#    doc.apply(52829, 608)
-
-
-apply_collection_to_xml_document("c:/data/projects/catma/winko/Huszai_sd_sw.xml", "c:/data/projects/catma/winko/J_1997_Huszai_Denken Sie.xml", "c:/data/projects/catma/winko/out.xml")
