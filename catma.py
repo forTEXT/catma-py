@@ -32,10 +32,10 @@ def remove_utf8bom(text: str) -> str:
 def generate_random_color() -> int:
     """
     Generates a random color as an integer representing an RGB color
-	consisting of the red component in bits 16-23, the green component in bits 8-15,
-	and the blue component in bits 0-7.
+    consisting of the red component in bits 16-23, the green component in bits 8-15,
+    and the blue component in bits 0-7.
 
-	:return: an integer that represents the computed color
+    :return: an integer that represents the computed color
     """
 
     red = random.randrange(256)
@@ -376,6 +376,12 @@ class Range(object):
         :return: True if the given point is after the end of this Range.
         """
         return self.end < point
+
+    def is_point(self) -> bool:
+        """
+        :return: true if this range represents a single point
+        """
+        return self.start == self.end
 
     def __hash__(self):
         return hash((self.start, self.end))
@@ -1153,7 +1159,7 @@ class XMLSourceDocumentPositionPointer(object):
         reversed_chunks =  list(self.chunks)
         reversed_chunks.reverse()
         for chunk in reversed_chunks:
-            if chunk.get_range().is_in_between_inclusive_edge(self.search_pos):
+            if not chunk.is_newline and chunk.get_range().is_in_between_inclusive_edge(self.search_pos):
                 return chunk
 
     def get_min_matching_chunk(self):
@@ -1165,6 +1171,8 @@ class XMLSourceDocumentPositionPointer(object):
         reversed_chunks.reverse()
         for chunk in reversed_chunks:
             if not chunk.get_range().is_in_between_inclusive_edge(self.search_pos) and last_chunk is not None:
+                if last_chunk.is_newline:
+                    return chunk
                 return last_chunk
             last_chunk = chunk
 
@@ -1190,11 +1198,16 @@ class XMLSourceDocumentPositionPointer(object):
         if old_end_chunk_range is not None:
             old_end_chunk = next((c for c in self.chunks if c.range == old_end_chunk_range), None)
 
+        idx = -1
         # is the given start chunk represented in this pointer's chunk list?
         if old_start_chunk is not None:
             idx = self.chunks.index(old_start_chunk)
             # set the new range of the start chunk
             old_start_chunk.range = start_chunk.range
+        elif start_chunk in self.chunks:
+            idx = self.chunks.index(start_chunk)
+
+        if idx != -1:
             # if the search position of this pointer includes the annotated text chunk
             if anno_text_chunk.range.start <= self.search_pos:
                 self.chunks.insert(idx+1,
@@ -1311,7 +1324,7 @@ class XMLSourceDocumentAnnotation(object):
                     while parent_layer in parent_map:
                         if parent_layer in chunks_by_layer:
                             current_layer = parent_layer
-                        if current_layer == end_layer:
+                        if current_layer == end_layer or current_layer == start_layer or parent_layer  == end_layer:
                             break
                         parent_layer = parent_map[parent_layer]
 
@@ -1372,7 +1385,7 @@ class XMLSourceDocumentAnnotation(object):
                         while parent_layer in parent_map:
                             if parent_layer in layers:
                                 layer = parent_layer
-                            if layer == end_layer:
+                            if layer == end_layer or parent_layer == end_layer:
                                 break
                             parent_layer = parent_map[parent_layer]
 
@@ -1400,19 +1413,19 @@ class XMLSourceDocumentAnnotation(object):
                     elif layer_start_chunk == end_chunk: # end of the annotation, may be a partial chunk
                         end_chunk.apply(self.annotation, Range(end_chunk.range.start, self.range.end), parent_map,
                                         recalculate_positions, self.element_name_from_tag_creator, self.attribute_name_from_property_creator)
-                    else: # somewhere in between, annotate full chunk
-                        start_chunk.apply(self.annotation, Range(start_chunk.range.start, start_chunk.range.end), parent_map,
+                    elif not layer_start_chunk.range.is_point(): # somewhere in between, annotate full chunk if there actually is anything to annotate
+                        layer_start_chunk.apply(self.annotation, Range(layer_start_chunk.range.start, layer_start_chunk.range.end), parent_map,
                                           recalculate_positions, self.element_name_from_tag_creator, self.attribute_name_from_property_creator)
                 else:
                     # hard: calculate a modfied start chunk with the start of the annotation
                     # and a modified end chunk with the end of the annotation
                     layer_start_range = layer_start_chunk.range
                     if layer_start_chunk == start_chunk:
-                        layer_start_range = Range(self.range.start, start_chunk.range.end)
+                        layer_start_range = Range(max(self.range.start, layer_start_chunk.range.start), start_chunk.range.end)
 
                     layer_end_range = layer_end_chunk.range
                     if layer_end_chunk == end_chunk:
-                        layer_end_range = Range(layer_end_chunk.range.start, self.range.end)
+                        layer_end_range = Range(layer_end_chunk.range.start, min(layer_end_chunk.range.end, self.range.end))
 
                     # annotated text of the start chunk
                     anno_text = layer_start_chunk.get_text(layer_start_range)
@@ -1420,7 +1433,7 @@ class XMLSourceDocumentAnnotation(object):
                     new_layer_start_chunk_text_or_tail = layer_start_chunk.get_text_up_to(layer_start_range.start)
 
                     # annotated text of the end chunk
-                    new_layer_end_chunk_tail = layer_end_chunk.get_text_up_to(self.range.end)
+                    new_layer_end_chunk_tail = layer_end_chunk.get_text_up_to(min(layer_end_chunk.range.end, self.range.end))
 
                     # non annotated text trailing the new annotation
                     anno_tail = layer_end_chunk.get_text_from(self.range.end)
@@ -1479,7 +1492,13 @@ class XMLSourceDocumentAnnotation(object):
                     old_layer_start_chunk_range = layer_start_chunk.range
                     layer_start_chunk.range = Range(layer_start_chunk.range.start, layer_start_range.start)
                     old_layer_end_chunk_range = layer_end_chunk.range
-                    layer_end_chunk.range = Range(layer_end_chunk.range.start, self.range.end)
+                    layer_end_chunk.range = Range(layer_end_chunk.range.start, min(layer_end_chunk.range.end, self.range.end))
+
+                    parent = parent_map[layer_end_chunk.node]
+                    if parent == layer:
+                        parent_map[layer_end_chunk.node].remove(layer_end_chunk.node)
+                        anno_el.append(layer_end_chunk.node)
+                        parent_map[layer_end_chunk.node] = anno_el
 
                     recalculate_positions(layer_start_chunk, old_layer_start_chunk_range, layer_end_chunk, old_layer_end_chunk_range, anno_text_chunk, anno_tail_chunk)
 
