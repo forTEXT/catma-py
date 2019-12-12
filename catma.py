@@ -905,7 +905,7 @@ def convert_ptr_refs_to_text(collection_filename: str, text_filename: str, outpu
     """
     Loads an Annotation Collection and a Source Document and replaces all pointer (<ptr>) occurrences in the Collection
     that point to the Source Document with their corresponding segment of text. The result is written to a file with the
-    given output_filename. The Annotation Collection must belong the Source Document!
+    given output_filename. The Annotation Collection must belong to the Source Document!
 
     :param collection_filename: Name of the Annotation Collection
     :param text_filename:  Name of the Source Document
@@ -1154,27 +1154,32 @@ class XMLSourceDocumentPositionPointer(object):
 
     def get_max_matching_chunk(self):
         """
-        :return: the chunk that is as close to the search position of this pointer as possible coming from the left side
+        :return: the chunk that is as close  as possible to the search position of this pointer coming from the left side
         """
         reversed_chunks =  list(self.chunks)
         reversed_chunks.reverse()
+        passed_search_pos = False
         for chunk in reversed_chunks:
-            if not chunk.is_newline and chunk.get_range().is_in_between_inclusive_edge(self.search_pos):
+            is_in_range = chunk.get_range().is_in_between_inclusive_edge(self.search_pos)
+            if not chunk.is_newline and (is_in_range or passed_search_pos):
                 return chunk
+
+            if is_in_range:
+                passed_search_pos = True
 
     def get_min_matching_chunk(self):
         """
-        :return: the chunk that is as close to the search position of this pointer as possible coming from the right side
+        :return: the chunk that is as close as possible to the search position of this pointer coming from the right side
         """
         last_chunk = None
         reversed_chunks =  list(self.chunks)
         reversed_chunks.reverse()
         for chunk in reversed_chunks:
-            if not chunk.get_range().is_in_between_inclusive_edge(self.search_pos) and last_chunk is not None:
-                if last_chunk.is_newline:
-                    return chunk
+            if not chunk.get_range().is_in_between_inclusive_edge(self.search_pos) and last_chunk is not None and not last_chunk.is_newline:
                 return last_chunk
             last_chunk = chunk
+
+        return last_chunk
 
     def recalculate(self, \
                               start_chunk: XMLSourceDocumentChunk, old_start_chunk_range: Range, \
@@ -1252,7 +1257,7 @@ def has_tail_content(node: XML) -> bool:
 
 class XMLSourceDocumentAnnotation(object):
     """
-    A representation of a CATMA Annotation on top of a XML based Sourdce Document.
+    A representation of a CATMA Annotation on top of a XML based Source Document.
     """
 
     def __init__(self, annotation: Annotation, range: Range,
