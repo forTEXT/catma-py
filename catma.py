@@ -81,7 +81,13 @@ def get_uuid_from_catma_uuid_str(catma_uuid: str) -> uuid.UUID:
     :param catma_uuid: a CATMA uuid like CATMA_8DF8AB1D-002F-4693-AB9B-96DAF9D1BA87
     :return: the corresponding uuid object, e. g. 8DF8AB1D-002F-4693-AB9B-96DAF9D1BA87
     """
-    return uuid.UUID(catma_uuid[6:])
+
+    if catma_uuid.startswith("CATMA"):
+        return uuid.UUID(catma_uuid[6:])
+
+    # CATMA 6 Tagset-ID starts with T, Document-ID starts with D, Collection-ID starts with C
+
+    return uuid.UUID(catma_uuid[2:])
 
 class Property(object):
     """
