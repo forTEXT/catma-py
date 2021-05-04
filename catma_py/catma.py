@@ -29,6 +29,19 @@ def remove_utf8bom(text: str) -> str:
     return text.replace(u'\ufeff', "")
 
 
+def to_signed_int32(num: int) -> int:
+    """
+    Convert input to signed 32 bit integer.
+    This has the same behavior as casting an integer to int32_t in C.
+    As a result, the return value may be negative.
+
+    :param num: python int value with the number to convert
+    :return: python int value with resulting value
+    """
+    num &= 0xffffffff
+    return num | (- (num & 0x80000000))
+
+
 def generate_random_color() -> int:
     """
     Generates a random color as an integer representing an RGB color
@@ -41,10 +54,11 @@ def generate_random_color() -> int:
     red = random.randrange(256)
     green = random.randrange(256)
     blue = random.randrange(256)
-    return ((255 & 0xFF) << 24) \
+    color = ((255 & 0xFF) << 24) \
            | ((red & 0xFF) << 16) \
            | ((green & 0xFF) << 8) \
            | ((blue & 0xFF) << 0)
+    return to_signed_int32(color)
 
 
 def gettimestamp() -> str:
