@@ -689,7 +689,7 @@ class TEIAnnotationReader(object):
     After construction the reader provides a list of tagsets, a list of annotations and meta data such as version, title,
     author, publisher, description
     """
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, no_ptr_refs_should_raise: bool = True):
         """
         Constructs the reader and loads the given file.
 
@@ -700,12 +700,14 @@ class TEIAnnotationReader(object):
 
         XML.register_namespace("", TEI_NAMESPACE_MAPPING["tei"])
         doc = XML.parse(filename)
-        self.read_metadata(doc)
-        has_ptr_refs = doc.find("./tei:text/tei:body/tei:ab//tei:ptr", TEI_NAMESPACE_MAPPING) is not None
-        if not has_ptr_refs:
-            raise Exception("This collection does not use <ptr> references and is not supported by this parser!")
 
-        self.text_length, self.documentid = self.extract_pointer_document_properties(doc)
+        self.read_metadata(doc)
+
+        has_ptr_refs = doc.find("./tei:text/tei:body/tei:ab//tei:ptr", TEI_NAMESPACE_MAPPING) is not None
+        if not has_ptr_refs and no_ptr_refs_should_raise:
+            raise Exception("This collection does not use <ptr> references and is not supported by this parser!")
+        elif has_ptr_refs:
+            self.text_length, self.documentid = self.extract_pointer_document_properties(doc)
 
         self.read_tagsets(doc)
         self.read_annotations(doc)
