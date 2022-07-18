@@ -57,11 +57,11 @@ def gettimestamp() -> str:
     return timestamp[:-8] + timestamp[-5:]
 
 
-def get_catma_uuid_as_str(provider) -> str:
+def get_catma_uuid_as_str(provider, prefix: str="CATMA") -> str:
     """
     :return: the uuid of the given provider as a CATMA uuid as str.
     """
-    return "CATMA_" + str(provider.uuid).upper()
+    return prefix + "_" + str(provider.uuid).upper()
 
 
 def get_xml_node_id(node: XML) -> str:
@@ -540,7 +540,7 @@ class TEIAnnotationWriter(object):
             fsddecl_el = XML.SubElement(
                 encodingdesc_el,
                 "fsdDecl",
-                {"xml:id": get_catma_uuid_as_str(tagset),
+                {"xml:id": get_catma_uuid_as_str(tagset, prefix="T"),
                  "n": tagset.name + " " + tagset.version})
             for tag in tagset.tags.values():
                 attr = {"xml:id": get_catma_uuid_as_str(tag),
