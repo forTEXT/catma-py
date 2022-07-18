@@ -537,7 +537,8 @@ class TEIAnnotationWriter(object):
             # print(XML.tostring(tei_el, pretty_print=True))
             XML.ElementTree(tei_el).write(file_or_filename=filename, xml_declaration=True, encoding="utf-8", method="xml")
         if outfile is not None:
-            XML.ElementTree(tei_el).write(file_or_filename=outfile, xml_declaration=True, encoding="utf-8", method="xml")
+            # To upload the resulting xml to catma we need to not emit an xml declaration
+            XML.ElementTree(tei_el).write(file_or_filename=outfile, xml_declaration=False, encoding="utf-8", method="xml")
 
     def write_tagsets(self, tei_el: XML):
         encodingdesc_el = XML.SubElement(tei_el, "encodingDesc")
