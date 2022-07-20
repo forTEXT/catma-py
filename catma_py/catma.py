@@ -12,6 +12,8 @@ import xml.etree.ElementTree as XML
 import random
 import datetime
 import string
+import typing
+from typing import Optional
 
 # The version of the generated CATMA import/export file format
 CATMA_TEI_VERSION = 5
@@ -510,12 +512,13 @@ class TEIAnnotationWriter(object):
         self.tagsets = tagsets
         self.annotations_list = annotations_list
 
-    def write_to_tei(self, filename: str = None, write_on_stdout=True):
+    def write_to_tei(self, filename: Optional[str] = None, outfile: Optional[typing.IO] = None, write_on_stdout=True):
         """
         Writes the data of this TEIAnnotationWriter to a file with the given full
         filename. Writes also to stdout if write_on_stdout is True (default)
 
         :param filename: then full path of the output file
+        :param outfile: supply to write output to the supplied object which can be any file-like object
         :param write_on_stdout: if True the result is also printed to stdout
         """
         tei_el = XML.Element("TEI", {"xml:lang": "en", "xmlns": TEI_NAMESPACE_MAPPING["tei"]})
@@ -533,6 +536,9 @@ class TEIAnnotationWriter(object):
         if filename is not None:
             # print(XML.tostring(tei_el, pretty_print=True))
             XML.ElementTree(tei_el).write(file_or_filename=filename, xml_declaration=True, encoding="utf-8", method="xml")
+        if outfile is not None:
+            # To upload the resulting xml to catma we need to not emit an xml declaration
+            XML.ElementTree(tei_el).write(file_or_filename=outfile, xml_declaration=False, encoding="utf-8", method="xml")
 
     def write_tagsets(self, tei_el: XML):
         encodingdesc_el = XML.SubElement(tei_el, "encodingDesc")
