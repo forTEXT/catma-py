@@ -33,7 +33,7 @@ def remove_utf8bom(text: str) -> str:
 
 def generate_random_color() -> int:
     """
-    Generates a random color as an integer representing an RGB color
+    Generates a random color as a 32-bit signed integer representing an RGB color
     consisting of the red component in bits 16-23, the green component in bits 8-15,
     and the blue component in bits 0-7.
 
@@ -43,10 +43,13 @@ def generate_random_color() -> int:
     red = random.randrange(256)
     green = random.randrange(256)
     blue = random.randrange(256)
-    return ((255 & 0xFF) << 24) \
+
+    unsigned_color = ((255 & 0xFF) << 24) \
            | ((red & 0xFF) << 16) \
            | ((green & 0xFF) << 8) \
            | ((blue & 0xFF) << 0)
+
+    return int.from_bytes(unsigned_color.to_bytes(4, byteorder="big", signed=False), byteorder="big", signed=True)
 
 
 def gettimestamp() -> str:
