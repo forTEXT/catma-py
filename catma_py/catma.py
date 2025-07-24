@@ -7,12 +7,14 @@ and a reader that consumes Annotation collection in CATMA TEI XML and builds the
 mentioned structures for further processing.
 @author: marco.petris@web.de
 """
+import datetime
+import os
+import random
+import string
+import textwrap
+import typing
 import uuid
 import xml.etree.ElementTree as XML
-import random
-import datetime
-import string
-import typing
 from typing import Optional
 
 # The version of the generated CATMA import/export file format
@@ -197,6 +199,11 @@ class Tag(object):
     def __repr__(self):
         return self.name + " #" + str(self.uuid)
 
+    def get_hex_color(self) -> str:
+        red = (self.color >> 16) & 0xFF
+        green = (self.color >> 8) & 0xFF
+        blue = (self.color >> 0) & 0xFF
+        return f"#{red:02x}{green:02x}{blue:02x}"
 
 class Tagset(object):
     """
@@ -248,6 +255,173 @@ class Tagset(object):
 
         return None
 
+    def _recursively_populate_child_tags(self, parent_tag, current_depth=1) -> tuple[list[Tag], int]:
+        child_tags = [tag for tag in self.tags.values() if tag.parent == parent_tag]
+        child_tags.sort(key=lambda tag: tag.name)
+
+        max_depth_reached = current_depth
+        for child_tag in child_tags:
+            child_tag.children, _depth_reached = self._recursively_populate_child_tags(child_tag, current_depth + 1)
+            if _depth_reached > max_depth_reached:
+                max_depth_reached = _depth_reached
+
+        return child_tags, max_depth_reached
+
+    def populate_tag_children(self) -> tuple[list[Tag], int]:
+        """
+        Tags already have a reference to their parent - this adds a 'children' property to every tag in this tagset.
+
+        :return: a tuple of top-level tags and the maximum depth reached in the tag hierarchy
+                 (max. depth is 0 if the tagset is empty / there are no top-level tags; 1 if there are only top-level
+                 tags, i.e., no child tags; otherwise > 1)
+        """
+        toplevel_tags = [tag for tag in self.tags.values() if tag.parent is None]
+        toplevel_tags.sort(key=lambda tag: tag.name)
+
+        max_depth_reached = 0
+        for tl_tag in toplevel_tags:
+            tl_tag.children, _depth_reached = self._recursively_populate_child_tags(tl_tag)
+            if _depth_reached > max_depth_reached:
+                max_depth_reached = _depth_reached
+
+        return toplevel_tags, max_depth_reached
+
+    def _recursively_render_tags(self, tags, max_depth, draw_hierarchy_lines=True, draw_guidelines=True,
+                                 current_depth=1, border_levels=frozenset()) -> str:
+        html = ""
+
+        for ti, tag in enumerate(tags):
+            # intentional leading whitespace - will be removed by dedent in to_basic_html
+            html += "\n                        <tr>"
+
+            # prepend empty cells according to our position in the hierarchy
+            for i in range(1, current_depth):
+                html += (f"<td{" class=\"hl-pre\"" if draw_hierarchy_lines and i > 1 and i in border_levels else ""}>"
+                         "</td>")
+
+            # the current tag
+            tag_css_classes = ["tag"]
+            if draw_guidelines:
+                tag_css_classes.append("gl")
+            if draw_hierarchy_lines:
+                tag_css_classes.append("hl")
+                if current_depth > 1:
+                    tag_css_classes.append("child")
+
+            # TODO: the use of &nbsp; here is a bit hacky - if it becomes a problem it might be worth considering an
+            #       alt. approach (e.g. https://stackoverflow.com/questions/3215553/make-a-div-fill-an-entire-table-cell)
+            html += (f"<td class=\"{" ".join(tag_css_classes)}\">"
+                     f"<div style=\"background-color: {tag.get_hex_color()};\">&nbsp;</div>{tag.name}"
+                     "</td>")
+
+            # append empty cells according to our position in the hierarchy
+            for i in range(current_depth, max_depth + 1):
+                html += f"<td{" class=\"gl\"" if draw_guidelines else ""}></td>"
+
+            # append cells for user properties and values
+            for prop in sorted(tag.properties.values(), key=lambda prop: prop.name):
+                if prop.name in ["catma_displaycolor", "catma_markupauthor"]:
+                    continue
+                html += f"<td{" class=\"gl\"" if draw_guidelines else ""}>{prop.name}</td>"
+                html += f"<td{" class=\"gl\"" if draw_guidelines else ""}>{", ".join(prop.values)}</td>"
+
+            html += "</tr>"
+
+            # recursively render subtags as subsequent rows
+            html += self._recursively_render_tags(
+                tag.children,
+                max_depth,
+                draw_hierarchy_lines,
+                draw_guidelines,
+                current_depth + 1,
+                border_levels if ti == len(tags) - 1 else border_levels | {current_depth}
+            )
+
+            # create some space around top-level tags
+            if current_depth == 1:
+                html += "<tr><td>&nbsp;</td></tr>"
+
+        return html
+
+    def to_basic_html(self, output_dir: str, output_filename: str = None,
+                      draw_hierarchy_lines=True, draw_guidelines=True):
+        """
+        Saves an HTML file with a basic tabular representation of this tagset, including tag color, hierarchy and
+        properties.
+
+        :param output_dir: the directory to save the HTML file to
+        :param output_filename: optional filename, defaults to the tagset name
+        :param draw_hierarchy_lines: whether to draw lines to visualize the tagset hierarchy more clearly, defaults to
+                                     True
+        :param draw_guidelines: whether to draw guidelines, defaults to True
+        """
+        toplevel_tags, max_depth_reached = self.populate_tag_children()
+
+        html = textwrap.dedent(
+            f"""        <!DOCTYPE html>
+            <html lang="en">
+                <head>
+                    <meta charset="utf-8">
+                    <title>Tagset: {self.name}</title>
+                    <style>
+                        body {{
+                            font-family: Arial, sans-serif;
+                        }}
+                        table {{
+                            border-collapse: collapse;
+                        }}
+                        th {{
+                            text-align: left;
+                            padding-bottom: 10px;
+                        }}
+                        td {{
+                            border: 1px #C0C0C0;
+                            /*border-style: solid;*/
+                            padding: 4px 20px 0 0;
+                        }}
+                        td div {{
+                            display: inline-block;
+                            width: 30px;
+                            margin-right: 3px;
+                        }}
+                        td.gl {{
+                            border-bottom-style: dashed;
+                        }}
+                        td.hl-pre {{
+                            border-left-style: solid;
+                        }}                        
+                        td.tag.hl {{
+                            border-bottom-style: solid;
+                        }}
+                        td.tag.hl.child {{
+                            border-left-style: solid;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <h1>Tagset: {self.name}</h1>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th colspan="{max_depth_reached + 1}">Tags</th>
+                                <th>Property [...]</th>
+                                <th>Values [...]</th>
+                            </tr>
+                        </thead>
+                        <tbody>{self._recursively_render_tags(
+                                    toplevel_tags, max_depth_reached, draw_hierarchy_lines, draw_guidelines
+                                )}
+                        </tbody>
+                    </table>
+                </body>
+            </html>""")
+
+        output_path = os.path.join(output_dir, output_filename if output_filename else self.name)
+        if not output_path.endswith(".html"):
+            output_path += ".html"
+
+        with(open(output_path, 'w', encoding='utf-8', newline='') as output_file):
+            output_file.write(html)
 
 class Annotation(object):
     """
